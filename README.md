@@ -1,7 +1,7 @@
 # dvr-yolo8-detection
 
 - Real-time human / animal / object detection and alert system
-- Uses Python + YOLOv8 + OpenCV2
+- Runs on Python + YOLOv8 + OpenCV2
 - Supports CUDA GPU acceleration
 - Separate batch processing tool for offline video file detections
 
