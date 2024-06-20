@@ -124,14 +124,12 @@ You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch d
 ## Credits
 Developed by [FlyingFathead](https://github.com/FlyingFathead), with the usual digital ghost code from ChaosWhisperer.
 
-## License
+## Licensing
 
-This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License. To view a copy of this license, visit [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License. For non-commercial use, you are free to share and adapt the material with appropriate credit. For commercial use, please contact us to obtain a separate commercial license.
 
-### Summary:
-- **Attribution:** You must give appropriate credit.
-- **NonCommercial:** You may not use the material for commercial purposes.
-- **ShareAlike:** If you remix, transform, or build upon the material, you must distribute your contributions under the same license as the original.
+- **Non-Commercial Use**: Follow the terms of the [CC BY-NC-SA 4.0 License](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+- **Commercial Use**: Contact us at flyingfathead <at> protonmail.com or visit [https://github.com/FlyingFathead](https://github.com/FlyingFathead) to discuss licensing options.
 
 ---
 
