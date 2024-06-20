@@ -1,7 +1,7 @@
 # dvr-yolo8-detection
 
-- Python + YOLOv8 + OpenCV2-based real-time human/animal/object detection and alert system
-- Batch processing for human/animal/object detection for offline videos
+- Python + YOLOv8 + OpenCV2-based, real-time human/animal/object detection + alert system
+- Batch processing for human/animal/object detection (for offline videos)
 
 ## Overview
 
