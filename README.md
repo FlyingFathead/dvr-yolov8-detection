@@ -21,11 +21,11 @@ The real-time detection also supports additional CUDA features such as CUDA vide
 - Audio alerts for real-time detections over TTS using `pyttsx3`   
 - Batch processing mode for video files for offline object/human/animal detection.
 
-- Configurable via `config.ini` configuration file:
-   - Customizable confidence threshold for detections.
-   - Option to skip rescaling of video frames.
-   - Option to log detection details into a separate log file.
-   - Saves frames with detected objects as images.
+- Configurable features via `config.ini`, i.e.:
+   - Confidence threshold for detections
+   - Skip rescaling of video frames
+   - Log detection details into a separate log file
+   - Save frames with detected objects as image files
    - Model variant selection (i.e. YOLOv8n, YOLOv8s, YOLOv8m, etc.)
    - Plenty of other options tho choose from...
 
