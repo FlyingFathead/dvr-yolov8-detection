@@ -1,9 +1,11 @@
 # dvr-yolo8-detection
 
 - Real-time human / animal / object detection and alert system
-- Runs on Python + YOLOv8 + OpenCV2, takes in RTMP streams
+- Runs on Python + YOLOv8 + OpenCV2
+- Takes in RTMP streams for real-time video processing sources
 - Supports CUDA GPU acceleration
-- Separate batch processing tool included for offline video file detections
+- Detections can be automatically saved to images with a detection log
+- Separate tool included for offline video file detections
 
 ## Overview
 
@@ -130,6 +132,6 @@ This project is licensed under the Creative Commons Attribution-NonCommercial-Sh
 - **NonCommercial:** You may not use the material for commercial purposes.
 - **ShareAlike:** If you remix, transform, or build upon the material, you must distribute your contributions under the same license as the original.
 
-###
+---
 
 If you like it, let me know. :-)
