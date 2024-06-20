@@ -19,7 +19,7 @@ CUDA enabled OpenCV2 is recommended for faster operation. **Note: CUDA-enabled O
 - Option to skip rescaling of video frames.
 - Logs detection details.
 - Saves frames with detected objects as images.
-- Configurable model variant (YOLOv8n, YOLOv8s, YOLOv8m, etc).
+- Configurable model variant (YOLOv8n, YOLOv8s, YOLOv8m, etc.)
 
 ## Requirements
 
