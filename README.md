@@ -26,8 +26,8 @@ The real-time detection also supports additional CUDA features such as CUDA vide
    - Option to skip rescaling of video frames.
    - Option to log detection details into a separate log file.
    - Saves frames with detected objects as images.
-   - Model variant (YOLOv8n, YOLOv8s, YOLOv8m, etc.)
-   - Plenty of other options...
+   - Model variant selection (i.e. YOLOv8n, YOLOv8s, YOLOv8m, etc.)
+   - Plenty of other options tho choose from...
 
 ## Requirements
 
