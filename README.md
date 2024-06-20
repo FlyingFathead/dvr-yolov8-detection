@@ -129,7 +129,7 @@ Developed by [FlyingFathead](https://github.com/FlyingFathead), with the usual d
 This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License. For non-commercial use, you are free to share and adapt the material with appropriate credit. For commercial use, please contact us to obtain a separate commercial license.
 
 - **Non-Commercial Use**: Follow the terms of the [CC BY-NC-SA 4.0 License](https://creativecommons.org/licenses/by-nc-sa/4.0/).
-- **Commercial Use**: Contact us at flyingfathead <at> protonmail.com or visit [https://github.com/FlyingFathead](https://github.com/FlyingFathead) to discuss licensing options.
+- **Commercial Use**: Contact the author at flyingfathead <@> protonmail.com or visit [https://github.com/FlyingFathead](https://github.com/FlyingFathead) to discuss licensing options.
 
 ---
 
