@@ -2,7 +2,9 @@
 #
 # yolov8_live_rtmp_stream_detection.py
 # June 20 // 2024
-#
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# https://github.com/FlyingFathead/dvr-yolov8-detection
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
 version_number = 0.1402
 
