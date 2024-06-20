@@ -17,5 +17,8 @@ env/
 
 # Ignore detection output images and videos
 detection_clips/
+detection_clips/**
 yolo_detections/
+yolo_detections/**
 logs/
+logs/**
