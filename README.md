@@ -93,7 +93,7 @@ You can configure various parameters by editing the `config.ini` file, this allo
 
 ### Example NGINX Configuration
 
-An example NGINX configuration is provided in `example-nginx.conf`. This config sets up an RTMP server that listens on `127.0.0.1:1935` and allows local clients to publish and play streams.
+An example NGINX configuration is provided in `example-nginx.conf`. This config sets up an RTMP server that listens on `127.0.0.1:1935` and allows local clients to publish and play streams. This is especially useful if you have a video source that's not internet-connected (such as any sort of USB camera or other kind of video feed) that you can connect to i.e. OBS Studio and want to loop that back into the detection.
 
 ### RTMP Loopback Script
 
