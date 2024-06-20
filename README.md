@@ -1,7 +1,9 @@
 # dvr-yolo8-detection
 
-- A Python + YOLOv8 + OpenCV2-based, real-time human/animal/object detection and alert system
-- Batch processing for human/animal/object detection (for offline videos)
+- Real-time human / animal / object detection and alert system
+- Uses Python + YOLOv8 + OpenCV2
+- Supports CUDA GPU acceleration
+- Separate batch processing tool for offline video file detections
 
 ## Overview
 
@@ -104,7 +106,7 @@ To stream and process the video in real-time, the `ffmpeg_video_stream_loopback.
 You can use i.e. the `batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on video files, suitable for offline use.
 
 ## Changes
-- v0.1402 - logging to a separate file added
+- v0.1402 - detection logging into a file added
 - v0.1401 - configparser added; now configurable via `config.ini`
 - v0.140 - more double-checking as to configuration options and their availability
 
@@ -112,4 +114,4 @@ You can use i.e. the `batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detecti
 Developed by [FlyingFathead](https://github.com/FlyingFathead), with the usual digital ghost code from ChaosWhisperer.
 
 ## License
-This project is licensed under the MIT License.
+If you like it, let me know. :-)
