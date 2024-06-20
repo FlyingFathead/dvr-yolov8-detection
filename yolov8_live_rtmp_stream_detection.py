@@ -4,7 +4,7 @@
 # June 20 // 2024
 #
 # Version number
-version_number = 0.1401
+version_number = 0.1402
 
 import cv2
 import torch

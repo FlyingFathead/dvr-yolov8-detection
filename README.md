@@ -1,6 +1,6 @@
 # dvr-yolo8-detection
 
-Python + YOLOv8 + OpenCV2 object detection batch processing for videos
+Python + YOLOv8 + OpenCV2-based real-time human/animal/object detection + batch processing framework for offline videos
 
 ## Overview
 
