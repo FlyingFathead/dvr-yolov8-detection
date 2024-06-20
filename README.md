@@ -14,7 +14,7 @@ The real-time detection also supports additional CUDA features such as CUDA vide
 ## Features
 
 - Real-time object detection from RTMP streams
-   - The source can be any IP camera or RTMP stream
+   - The source can be any RTMP stream (i.e. an IP camera, DVR that streams RTMP video, etc.)
    - Use any USB webcam/video feed as a source w/ OSB Studio + RTMP loopback
 - Audio alerts for real-time detections over TTS using `pyttsx3`   
 - Batch processing mode for video files for offline object/human/animal detection.
