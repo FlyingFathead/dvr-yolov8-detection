@@ -11,8 +11,8 @@ CUDA enabled OpenCV2 is recommended for faster operation. **Note: CUDA-enabled O
 ## Features
 
 - Real-time object detection from RTMP streams
-   - The source can be any IP camera or loopback USB device sent to RTMP
-   - (This can be done with i.e. OBS Studio, etc.)
+   - The source can be any IP camera or RTMP stream
+   - Use any USB webcam/video feed as a source w/ OSB Studio + RTMP loopback
 - Audio alerts for real-time detections over TTS using `pyttsx3`   
 - Batch processing mode for video files for offline object/human/animal detection.
 - Customizable confidence threshold for detections.
