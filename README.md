@@ -1,6 +1,6 @@
 # dvr-yolo8-detection
 
-- Python + YOLOv8 + OpenCV2-based, real-time human/animal/object detection + alert system
+- A Python + YOLOv8 + OpenCV2-based, real-time human/animal/object detection and alert system
 - Batch processing for human/animal/object detection (for offline videos)
 
 ## Overview
@@ -49,7 +49,7 @@ The real-time detection also supports additional CUDA features such as CUDA vide
 2. Install the required Python packages:
 
    ```bash
-   pip install torch ultralytics opencv-python-headless numpy pyttsx3
+   pip install torch ultralytics opencv-python-headless numpy pyttsx3 configparser
    ```
 
 3. Install OpenCV:
