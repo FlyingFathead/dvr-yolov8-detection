@@ -1,4 +1,4 @@
-import cv2
+i/mport cv2
 import torch
 import logging
 import time
@@ -20,7 +20,7 @@ DEFAULT_MODEL_VARIANT = 'yolov8m'
 DRAW_RECTANGLES = True
 SAVE_DETECTIONS = True
 IMAGE_FORMAT = 'jpg'
-SAVE_DIR = '/mnt/yolo_detections'
+SAVE_DIR = '/path/to/yolo_detections'
 RETRY_DELAY = 2
 MAX_RETRIES = 10
 RESCALE_INPUT = False

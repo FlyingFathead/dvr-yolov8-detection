@@ -60,56 +60,42 @@ PROCESS_FPS = config.getint('detection', 'process_fps')
 TIMEOUT = config.getint('detection', 'timeout')
 TTS_COOLDOWN = config.getint('detection', 'tts_cooldown')
 # Logging options
-ENABLE_LOGGING = config.getboolean('logging', 'enable_logging')
-ENABLE_DETECTION_LOGGING = config.getboolean('logging', 'enable_detection_logging')
+ENABLE_DETECTION_LOGGING_TO_FILE = config.getboolean('logging', 'enable_detection_logging_to_file')
 LOG_DIRECTORY = config.get('logging', 'log_directory')
 LOG_FILE = config.get('logging', 'log_file')
-DETECTION_LOG_FILE = config.get('logging', 'detection_log_file', fallback='detections.log')
+DETECTION_LOG_FILE = config.get('logging', 'detection_log_file')
 
-# Define the logger
-logger = logging.getLogger('detection_logger')
-logger.setLevel(logging.INFO)
-log_path = os.path.join(LOG_DIRECTORY, LOG_FILE)
+# Define the main logger
+main_logger = logging.getLogger('main')
+main_logger.setLevel(logging.INFO)
 
 # Clear existing handlers if they exist
-if logger.hasHandlers():
-    logger.handlers.clear()
+if main_logger.hasHandlers():
+    main_logger.handlers.clear()
 
-# Configure logging based on ENABLE_LOGGING
-if ENABLE_LOGGING:
+# Configure main logger for console output
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+stream_handler.setFormatter(formatter)
+main_logger.addHandler(stream_handler)
+
+# Configure detection logger if enabled
+detection_logger = logging.getLogger('detection')
+detection_logger.setLevel(logging.INFO)
+
+# Check if detection logging to file is enabled
+if ENABLE_DETECTION_LOGGING_TO_FILE:
     if not os.path.exists(LOG_DIRECTORY):
         os.makedirs(LOG_DIRECTORY)
-
-    # Create file handler
-    file_handler = logging.FileHandler(log_path)
-    file_handler.setLevel(logging.INFO)
-
-    # Create stream handler
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.INFO)
-
-    # Create formatter and add it to the handlers
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    file_handler.setFormatter(formatter)
-    stream_handler.setFormatter(formatter)
-
-    # Add handlers to the logger
-    logger.addHandler(file_handler)
-    logger.addHandler(stream_handler)
+    detection_log_path = os.path.join(LOG_DIRECTORY, DETECTION_LOG_FILE)
+    detection_file_handler = logging.FileHandler(detection_log_path)
+    detection_file_handler.setLevel(logging.INFO)
+    detection_file_handler.setFormatter(formatter)
+    detection_logger.addHandler(detection_file_handler)
+    main_logger.info(f"Detection logging to file is enabled. Logging to: {detection_log_path}")
 else:
-    # Create stream handler for console output only
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.INFO)
-
-    # Create formatter and add it to the handler
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    stream_handler.setFormatter(formatter)
-
-    # Add handler to the logger
-    logger.addHandler(stream_handler)
-
-# Test logging
-logger.info("Logging configuration complete.")
+    main_logger.info("Detection logging to file is disabled.")
 
 # Timekeeping and frame counting
 last_log_time = time.time()
@@ -189,10 +175,10 @@ elif not os.access(SAVE_DIR, os.W_OK):
 
 # Function to log detection details
 def log_detection_details(detections, frame_count, timestamp):
-    if ENABLE_DETECTION_LOGGING:
+    if ENABLE_DETECTION_LOGGING_TO_FILE:
         for detection in detections:
             x1, y1, x2, y2, confidence, class_idx = detection
-            logging.info(f"Detection: Frame {frame_count}, Timestamp {timestamp}, Coordinates: ({x1}, {y1}), ({x2}, {y2}), Confidence: {confidence:.2f}")
+            detection_logger.info(f"Detection: Frame {frame_count}, Timestamp {timestamp}, Coordinates: ({x1}, {y1}), ({x2}, {y2}), Confidence: {confidence:.2f}")
 
 # Function to resize while maintaining aspect ratio
 def resize_frame(frame, target_height):
