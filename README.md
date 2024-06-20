@@ -56,7 +56,7 @@ The real-time detection also supports additional CUDA features such as CUDA vide
 
 This approach ensures that the dependencies are managed through the `requirements.txt` file, making it easier to maintain and update them in the future.
 
-- (You can also install the required Python packages mannually if need be):
+- (You can also install the required Python packages manually if need be):
 
    ```bash
    pip install torch ultralytics opencv-python-headless numpy pyttsx3 configparser
