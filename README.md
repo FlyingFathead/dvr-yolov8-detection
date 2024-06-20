@@ -103,7 +103,7 @@ To stream and process the video in real-time, the `ffmpeg_video_stream_loopback.
 
 # Offline Batch Detection
 
-You can use i.e. the `batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on video files, suitable for offline use.
+You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on video files, suitable for offline use if you need to go through pre-existing video files.
 
 ## Changes
 - v0.1402 - detection logging into a file added
