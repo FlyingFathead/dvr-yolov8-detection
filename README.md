@@ -53,7 +53,7 @@ The real-time detection also supports additional CUDA features such as CUDA vide
    ```bash
    pip install -r requirements.txt
    ```
-```
+
 This approach ensures that the dependencies are managed through the `requirements.txt` file, making it easier to maintain and update them in the future.
 
 - (You can also install the required Python packages mannually if need be):
