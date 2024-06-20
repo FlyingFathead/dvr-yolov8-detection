@@ -9,7 +9,7 @@
 
 This project leverages YOLOv8 and OpenCV2 to perform object detection on either real-time video streams or batches of video files. It processes each video frame by frame, detects humans (by default; other specified objects can be added in as well), and logs the detections. Additionally, it saves frames with detected objects/entities highlighted.
 
-CUDA enabled OpenCV2 is recommended for faster operation. **Note: CUDA-enabled OpenCV2 needs to be compiled manually and installed separately and the compiling process is highly dependent on your hardware setup, so I will not post separate guides on it here.**
+CUDA enabled OpenCV2 is recommended for faster operation. **Note: CUDA-enabled OpenCV2 needs to be compiled manually and installed separately and the compiling process is highly dependent on your hardware setup, so I will not post separate guides on the compile process here.**
 
 The real-time detection also supports additional CUDA features such as CUDA video denoising (note: requires CUDA compiled from source).
 
