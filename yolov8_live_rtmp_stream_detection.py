@@ -1,0 +1,449 @@
+#!/usr/bin/env python3
+#
+# yolov8_live_rtmp_stream_detection.py
+# June 20 // 2024
+#
+# Version number
+version_number = 0.1401
+
+import cv2
+import torch
+import logging
+import numpy as np
+
+# time and tz related
+import time
+from datetime import datetime
+import pytz
+
+import pyttsx3
+import os
+from ultralytics import YOLO
+import threading
+from threading import Thread, Event, Lock
+from queue import Queue
+import configparser
+import argparse
+import signal
+import sys
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Load configuration from `config.ini` file with case-sensitive keys
+def load_config(config_path='config.ini'):
+    config = configparser.ConfigParser()
+    config.optionxform = str  # Override optionxform to make keys case-sensitive
+    config.read(config_path)
+    return config
+
+# Load configuration
+config = load_config()
+
+# Assign configurations to variables
+DEFAULT_CONF_THRESHOLD = config.getfloat('general', 'default_conf_threshold')
+DEFAULT_MODEL_VARIANT = config.get('general', 'default_model_variant')
+STREAM_URL = config.get('stream', 'stream_url')
+DRAW_RECTANGLES = config.getboolean('detection', 'draw_rectangles')
+SAVE_DETECTIONS = config.getboolean('detection', 'save_detections')
+IMAGE_FORMAT = config.get('detection', 'image_format')
+USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir')
+ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var')
+DEFAULT_SAVE_DIR = config.get('detection', 'default_save_dir')
+RETRY_DELAY = config.getint('detection', 'retry_delay')
+MAX_RETRIES = config.getint('detection', 'max_retries')
+RESCALE_INPUT = config.getboolean('detection', 'rescale_input')
+TARGET_HEIGHT = config.getint('detection', 'target_height')
+DENOISE = config.getboolean('detection', 'denoise')
+USE_PROCESS_FPS = config.getboolean('detection', 'use_process_fps')
+PROCESS_FPS = config.getint('detection', 'process_fps')
+TIMEOUT = config.getint('detection', 'timeout')
+TTS_COOLDOWN = config.getint('detection', 'tts_cooldown')
+# Logging options
+ENABLE_LOGGING = config.getboolean('logging', 'enable_logging')
+ENABLE_DETECTION_LOGGING = config.getboolean('logging', 'enable_detection_logging')
+LOG_DIRECTORY = config.get('logging', 'log_directory')
+LOG_FILE = config.get('logging', 'log_file')
+DETECTION_LOG_FILE = config.get('logging', 'detection_log_file', fallback='detections.log')
+
+# Define the logger
+logger = logging.getLogger('detection_logger')
+logger.setLevel(logging.INFO)
+log_path = os.path.join(LOG_DIRECTORY, LOG_FILE)
+
+# Clear existing handlers if they exist
+if logger.hasHandlers():
+    logger.handlers.clear()
+
+# Configure logging based on ENABLE_LOGGING
+if ENABLE_LOGGING:
+    if not os.path.exists(LOG_DIRECTORY):
+        os.makedirs(LOG_DIRECTORY)
+
+    # Create file handler
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setLevel(logging.INFO)
+
+    # Create stream handler
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+
+    # Create formatter and add it to the handlers
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    stream_handler.setFormatter(formatter)
+
+    # Add handlers to the logger
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+else:
+    # Create stream handler for console output only
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.INFO)
+
+    # Create formatter and add it to the handler
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    stream_handler.setFormatter(formatter)
+
+    # Add handler to the logger
+    logger.addHandler(stream_handler)
+
+# Test logging
+logger.info("Logging configuration complete.")
+
+# Timekeeping and frame counting
+last_log_time = time.time()
+
+# Initialize TTS engine
+tts_engine = pyttsx3.init()
+tts_lock = Lock()
+last_tts_time = 0
+tts_thread = None
+tts_stop_event = Event()
+
+# Load the YOLOv8 model
+def load_model(model_variant=DEFAULT_MODEL_VARIANT):
+    try:
+        model = YOLO(model_variant)
+        model.to('cuda')
+        return model
+    except Exception as e:
+        logging.error(f"Error loading model {model_variant}: {e}")
+        raise
+
+# Initialize model
+model = load_model(DEFAULT_MODEL_VARIANT)
+
+# Get available CUDA GPU and its details
+def log_cuda_info():
+    if not torch.cuda.is_available():
+        logging.warning("No CUDA devices detected. Running on CPU.")
+        return
+
+    num_gpus = torch.cuda.device_count()
+    logging.info(f"Number of CUDA devices detected: {num_gpus}")
+
+    for i in range(num_gpus):
+        gpu_name = torch.cuda.get_device_name(i)
+        gpu_capability = torch.cuda.get_device_capability(i)
+        gpu_memory = torch.cuda.get_device_properties(i).total_memory / 1e9  # Convert bytes to GB
+        logging.info(f"CUDA Device {i}: {gpu_name}")
+        logging.info(f"  Compute Capability: {gpu_capability[0]}.{gpu_capability[1]}")
+        logging.info(f"  Total Memory: {gpu_memory:.2f} GB")
+
+    # Log the current device being used
+    current_device = torch.cuda.current_device()
+    current_gpu_name = torch.cuda.get_device_name(current_device)
+    logging.info(f"Using CUDA Device {current_device}: {current_gpu_name}")
+
+# Function to get the save directory
+def get_save_dir():
+    if USE_ENV_SAVE_DIR:
+        env_dir = os.getenv(ENV_SAVE_DIR_VAR)
+        if env_dir:
+            if os.path.exists(env_dir):
+                logging.info(f"Using environment-specified save directory: {env_dir}")
+                return env_dir
+            else:
+                logging.warning(f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist. Using default save directory: {DEFAULT_SAVE_DIR}")
+        else:
+            logging.warning(f"Environment variable {ENV_SAVE_DIR_VAR} not set. Using default save directory: {DEFAULT_SAVE_DIR}")
+    else:
+        logging.info(f"Using default save directory: {DEFAULT_SAVE_DIR}")
+    return DEFAULT_SAVE_DIR
+
+# Initialize the save directory
+SAVE_DIR = get_save_dir()
+
+# Ensure the save directory exists and is writable
+if not os.path.exists(SAVE_DIR):
+    try:
+        os.makedirs(SAVE_DIR)
+        logging.info(f"Created save directory: {SAVE_DIR}")
+    except Exception as e:
+        logging.error(f"Failed to create save directory: {SAVE_DIR}. Error: {e}")
+        raise RuntimeError(f"Failed to create save directory: {SAVE_DIR}") from e
+elif not os.access(SAVE_DIR, os.W_OK):
+    logging.error(f"Save directory {SAVE_DIR} is not writable. Exiting.")
+    raise RuntimeError(f"Save directory {SAVE_DIR} is not writable.")
+
+# Function to log detection details
+def log_detection_details(detections, frame_count, timestamp):
+    if ENABLE_DETECTION_LOGGING:
+        for detection in detections:
+            x1, y1, x2, y2, confidence, class_idx = detection
+            logging.info(f"Detection: Frame {frame_count}, Timestamp {timestamp}, Coordinates: ({x1}, {y1}), ({x2}, {y2}), Confidence: {confidence:.2f}")
+
+# Function to resize while maintaining aspect ratio
+def resize_frame(frame, target_height):
+    """Resize the frame to the target height while maintaining the aspect ratio."""
+    height, width = frame.shape[:2]
+    aspect_ratio = width / height
+    new_width = int(target_height * aspect_ratio)
+    resized_frame = cv2.resize(frame, (new_width, target_height))
+    return resized_frame
+
+# Function to announce detection using a separate thread
+def announce_detection():
+    global last_tts_time
+    current_time = time.time()
+    while not tts_stop_event.is_set():
+        current_time = time.time()
+        if current_time - last_tts_time >= TTS_COOLDOWN:
+            with tts_lock:
+                tts_engine.say("Human detected!")
+                tts_engine.runAndWait()
+            last_tts_time = current_time
+        time.sleep(1)
+
+# Function to save detection image
+def save_detection_image(frame, detection_count):
+    try:
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        filename = os.path.join(SAVE_DIR, f"detection_{detection_count}_{timestamp}.{IMAGE_FORMAT}")
+        cv2.imwrite(filename, frame)
+        logging.info(f"Saved detection image: {filename}")
+    except Exception as e:
+        logging.error(f"Error saving detection image: {e}")
+
+# Check if the CUDA denoising function is available
+def cuda_denoising_available():
+    try:
+        _ = cv2.cuda.createFastNlMeansDenoisingColored
+        logging.info("CUDA denoising is available.")
+        return True
+    except AttributeError:
+        logging.warning("CUDA denoising is not available.")
+        return False
+
+# Frame capture thread
+def frame_capture_thread(stream_url, frame_queue, stop_event):
+    retries = 0
+    cap = None
+
+    while retries < MAX_RETRIES:
+        logging.info(f"Attempting to open video stream: {stream_url}")
+
+        # Set FFmpeg options
+        ffmpeg_options = {
+            'rtmp_buffer': '1000',  # Increase buffer size
+            'max_delay': '5000000',  # Increase maximum delay
+            'stimeout': '5000000'  # Socket timeout
+        }
+        options = ' '.join([f'-{k} {v}' for k, v in ffmpeg_options.items()])
+        cap = cv2.VideoCapture(f'{stream_url} {options}')
+
+        # Set the timeout for the video stream
+        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, TIMEOUT * 1000)
+        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, TIMEOUT * 1000)
+
+        if cap.isOpened():
+            logging.info("Successfully opened video stream.")
+            break
+        else:
+            logging.error(f"Unable to open video stream: {stream_url}. Retrying in {RETRY_DELAY} seconds...")
+            time.sleep(RETRY_DELAY)
+            retries += 1
+
+    if cap is None or not cap.isOpened():
+        logging.error(f"Failed to open video stream: {stream_url} after {MAX_RETRIES} retries.")
+        return
+
+    while not stop_event.is_set():
+        ret, frame = cap.read()
+        if not ret:
+            logging.warning("Failed to read frame from stream.")
+            time.sleep(1)
+            continue
+        frame_queue.put(frame)
+
+    cap.release()
+    logging.info("Video stream closed.")
+
+# Frame processing thread
+def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectangles, denoise, process_fps, use_process_fps, detection_ongoing):
+    global last_tts_time, tts_thread, tts_stop_event
+    model = load_model(DEFAULT_MODEL_VARIANT)
+    use_cuda_denoising = cuda_denoising_available()
+    detection_count = 0
+    last_log_time = time.time()
+    total_frames = 0
+    detecting_human = False
+
+    # Create a named window with the ability to resize
+    cv2.namedWindow('Real-time Human Detection', cv2.WINDOW_NORMAL)
+
+    while not stop_event.is_set() or not frame_queue.empty():
+        if not frame_queue.empty():
+            frame = frame_queue.get()
+            start_time = time.time()
+
+            if RESCALE_INPUT:
+                resized_frame = resize_frame(frame, TARGET_HEIGHT)
+            else:
+                resized_frame = frame
+
+            if denoise:
+                try:
+                    if use_cuda_denoising:
+                        gpu_frame = cv2.cuda_GpuMat()
+                        gpu_frame.upload(resized_frame)
+                        denoised_frame = cv2.cuda.createFastNlMeansDenoisingColored(gpu_frame, None, 3, 3, 7).download()
+                    else:
+                        denoised_frame = cv2.fastNlMeansDenoisingColored(resized_frame, None, 3, 3, 7, 21)
+                except cv2.error as e:
+                    logging.error(f"Error applying denoising: {e}")
+                    denoised_frame = resized_frame
+            else:
+                denoised_frame = resized_frame
+
+            results = model.predict(source=denoised_frame, conf=conf_threshold, classes=[0], verbose=False)
+            detections = results[0].boxes.data.cpu().numpy()
+
+            if detections.size > 0:
+                if not detecting_human:
+                    detecting_human = True
+                    detection_ongoing.set()
+                    detection_count += 1
+                    logging.info(f"Detections found: {detections}")
+                for detection in detections:
+                    x1, y1, x2, y2, confidence, class_idx = detection
+                    if draw_rectangles:
+                        x1, y1, x2, y2 = max(0, int(x1)), max(0, int(y1)), min(denoised_frame.shape[1], int(x2)), min(denoised_frame.shape[0], int(y2))
+                        cv2.rectangle(denoised_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        label = f'Person: {confidence:.2f}'
+                        cv2.putText(denoised_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                        logging.info(f"Rectangle drawn: {x1, y1, x2, y2} with confidence {confidence:.2f}")
+                if SAVE_DETECTIONS:
+                    save_detection_image(denoised_frame, detection_count)
+
+                # Calculate the current timestamp
+                # timestamp = datetime.now(pytz.timezone('Europe/Helsinki')).strftime('%Y-%m-%d %H:%M:%S %Z%z')
+
+                # Calculate the current timestamp using the local system's timezone
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z%z')
+
+                # Log the detection details
+                log_detection_details(detections, total_frames, timestamp)
+
+                # Start the TTS announcement in a separate thread if not already running
+                if tts_thread is None or not tts_thread.is_alive():
+                    tts_stop_event.clear()
+                    tts_thread = threading.Thread(target=announce_detection)
+                    tts_thread.start()
+
+            else:
+                if detecting_human:
+                    detecting_human = False
+                    detection_ongoing.clear()
+                    tts_stop_event.set()  # Stop TTS when no human is detected
+
+            # Display the denoised frame
+            cv2.imshow('Real-time Human Detection', denoised_frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                stop_event.set()
+                break
+
+            total_frames += 1
+            if time.time() - last_log_time >= 1:
+                fps = total_frames / (time.time() - last_log_time)
+                logging.info(f'Processed {total_frames} frames at {fps:.2f} FPS')
+                last_log_time = time.time()
+                total_frames = 0
+
+            if use_process_fps:
+                frame_time = time.time() - start_time
+                frame_interval = 1.0 / process_fps
+                time_to_wait = frame_interval - frame_time
+                if time_to_wait > 0:
+                    time.sleep(time_to_wait)
+
+    tts_stop_event.set()  # Ensure TTS stops if the program is stopping
+    cv2.destroyAllWindows()
+
+# When the user wants to exit
+def signal_handler(sig, frame):
+    logging.info("Interrupt received, stopping, please wait for the program to finish...")
+    stop_event.set()
+
+# Main
+if __name__ == "__main__":
+    log_cuda_info()  # Add this line
+    parser = argparse.ArgumentParser(description="YOLOv8 RTMP Stream Human Detection")
+    parser.add_argument("--stream_url", type=str, default=STREAM_URL, help="URL of the RTMP stream")
+    parser.add_argument("--conf_threshold", type=float, default=DEFAULT_CONF_THRESHOLD, help="Confidence threshold for detections")
+    parser.add_argument("--model_variant", type=str, default=DEFAULT_MODEL_VARIANT, help="YOLOv8 model variant to use")
+    parser.add_argument("--draw_rectangles", type=bool, default=DRAW_RECTANGLES, help="Draw rectangles around detected objects")
+    parser.add_argument("--save_detections", type=bool, default=SAVE_DETECTIONS, help="Save images with detections")
+    parser.add_argument("--image_format", type=str, default=IMAGE_FORMAT, help="Image format for saving detections (jpg or png)")
+    parser.add_argument("--save_dir", type=str, default=SAVE_DIR, help="Directory to save detection images")
+    parser.add_argument("--retry_delay", type=int, default=RETRY_DELAY, help="Delay between retries to connect to the stream")
+    parser.add_argument("--max_retries", type=int, default=MAX_RETRIES, help="Maximum number of retries to connect to the stream")
+    parser.add_argument("--rescale_input", type=bool, default=RESCALE_INPUT, help="Rescale the input frames")
+    parser.add_argument("--target_height", type=int, default=TARGET_HEIGHT, help="Target height for rescaling the frames")
+    parser.add_argument("--denoise", type=bool, default=DENOISE, help="Toggle denoising on/off")
+    parser.add_argument("--process_fps", type=int, default=PROCESS_FPS, help="Frames per second for processing")
+    parser.add_argument("--use_process_fps", type=bool, default=USE_PROCESS_FPS, help="Whether to use custom processing FPS")
+    parser.add_argument("--timeout", type=int, default=TIMEOUT, help="Timeout for the video stream in seconds")
+
+    args = parser.parse_args()
+    
+    STREAM_URL = args.stream_url
+    DRAW_RECTANGLES = args.draw_rectangles
+    SAVE_DETECTIONS = args.save_detections
+    IMAGE_FORMAT = args.image_format
+    SAVE_DIR = args.save_dir
+    RETRY_DELAY = args.retry_delay
+    MAX_RETRIES = args.max_retries
+    RESCALE_INPUT = args.rescale_input
+    TARGET_HEIGHT = args.target_height
+    DENOISE = args.denoise
+    PROCESS_FPS = args.process_fps
+    USE_PROCESS_FPS = args.use_process_fps
+    TIMEOUT = args.timeout
+
+    frame_queue = Queue(maxsize=10)
+    stop_event = Event()
+    detection_ongoing = Event()
+
+    logging.info(f"Saving detections to directory: {SAVE_DIR}")
+
+    # Register signal handler for clean exit
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+
+    # Initialize threads
+    capture_thread = Thread(target=frame_capture_thread, args=(STREAM_URL, frame_queue, stop_event))
+    processing_thread = Thread(target=frame_processing_thread, args=(frame_queue, stop_event, args.conf_threshold, DRAW_RECTANGLES, DENOISE, PROCESS_FPS, USE_PROCESS_FPS, detection_ongoing))
+
+    try:
+        capture_thread.start()
+        processing_thread.start()
+
+        capture_thread.join()
+        processing_thread.join()
+    
+    finally:
+        logging.info("Cleaning up threads and resources.")
+        cv2.destroyAllWindows()
+        logging.info("Program exited cleanly.")

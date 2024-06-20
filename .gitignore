@@ -1,0 +1,21 @@
+# Ignore YOLO model files
+*.pt
+*.pth
+*.model
+
+# Ignore cache directories
+.cache/
+__pycache__/
+
+# Ignore logs and temporary files
+*.log
+*.tmp
+
+# Ignore Python virtual environment directories
+venv/
+env/
+
+# Ignore detection output images and videos
+detection_clips/
+yolo_detections/
+logs/
