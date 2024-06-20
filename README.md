@@ -66,13 +66,13 @@ This approach ensures that the dependencies are managed through the `requirement
    ```
 
 3. Install OpenCV:
-   - For a headless version (no GUI support):
-     ```bash
-     pip install opencv-python-headless
-     ```
-   - For a full version (with GUI support):
+   - For a full version (with GUI support, **recommended**):
      ```bash
      pip install opencv-python
+     ```
+   - For a headless version (no GUI support, **not recommended unless using offline batch processing only**):
+     ```bash
+     pip install opencv-python-headless
      ```
    - **For CUDA-enabled OpenCV**, you need to build it from source. Follow the instructions on the [OpenCV documentation](https://docs.opencv.org/master/d6/d15/tutorial_building_tegra_cuda.html).
 
