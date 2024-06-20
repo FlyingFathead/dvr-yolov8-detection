@@ -3,6 +3,7 @@
 - Real-time human / animal / object detection and alert system
 - Runs on Python + YOLOv8 + OpenCV2
 - Takes in RTMP streams for real-time video processing sources
+   - (a loopback example included for use with i.e. OBS Studio)
 - Supports CUDA GPU acceleration
 - Detections can be automatically saved to images with a detection log
 - Separate tool included for offline video file detections
