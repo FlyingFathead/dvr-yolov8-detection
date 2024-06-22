@@ -252,15 +252,19 @@ function update_or_clone_repo() {
 
 function locate_nv_sdk_headers() {
     # Prefer /usr/local/cuda-12.4 paths
-    if [ -f /usr/local/cuda-12.4/targets/x86_64-linux/include/nvcuvid.h ] && [ -f /usr/local/cuda-12.4/targets/x86_64-linux/include/nvEncodeAPI.h ]; then
+    if [ -f /usr/local/cuda-12.4/targets/x86_64-linux/include/nvcuvid.h ] && 
+       [ -f /usr/local/cuda-12.4/targets/x86_64-linux/include/nvEncodeAPI.h ] && 
+       [ -f $HOME/opencv_build/SDK/Video_Codec_SDK_12.2.72/Interface/cuviddec.h ]; then
         NVCUVID_HEADER_DIR="/usr/local/cuda-12.4/targets/x86_64-linux/include"
         NVENCODEAPI_HEADER_DIR="/usr/local/cuda-12.4/targets/x86_64-linux/include"
+        CUVIDDEC_HEADER_DIR="$HOME/opencv_build/SDK/Video_Codec_SDK_12.2.72/Interface"
     else
         # Fall back to /usr/include if not found in /usr/local/cuda-12.4
         nvcuvid_path=$(locate nvcuvid.h | grep -m 1 "/usr/include/ffnvcodec" || locate nvcuvid.h | grep -m 1 "/usr/local/include/ffnvcodec")
         nvencodeapi_path=$(locate nvEncodeAPI.h | grep -m 1 "/usr/include/ffnvcodec" || locate nvEncodeAPI.h | grep -m 1 "/usr/local/include/ffnvcodec")
+        cuviddec_path=$(locate cuviddec.h | grep -m 1 "/usr/include/ffnvcodec" || locate cuviddec.h | grep -m 1 "/usr/local/include/ffnvcodec")
         
-        if [ -z "$nvcuvid_path" ] || [ -z "$nvencodeapi_path" ]; then
+        if [ -z "$nvcuvid_path" ] || [ -z "$nvencodeapi_path" ] || [ -z "$cuviddec_path" ]; then
             viivo &&
             echo "NVIDIA Video Codec SDK headers not found. Please download and install them from the NVIDIA website."
             echo "Download from: https://developer.nvidia.com/nvidia-video-codec-sdk"
@@ -271,12 +275,14 @@ function locate_nv_sdk_headers() {
 
         NVCUVID_HEADER_DIR=$(dirname "$nvcuvid_path")
         NVENCODEAPI_HEADER_DIR=$(dirname "$nvencodeapi_path")
+        CUVIDDEC_HEADER_DIR=$(dirname "$cuviddec_path")
     fi
 
     viivo &&
     echo "Found NVIDIA Video Codec SDK headers:"
     echo "nvcuvid.h: $NVCUVID_HEADER_DIR/nvcuvid.h"
     echo "nvEncodeAPI.h: $NVENCODEAPI_HEADER_DIR/nvEncodeAPI.h"
+    echo "cuviddec.h: $CUVIDDEC_HEADER_DIR/cuviddec.h"
     viivo &&
     echo ""
 }
@@ -284,12 +290,14 @@ function locate_nv_sdk_headers() {
 function set_nv_sdk_paths() {
     export NVCUVID_HEADER_DIR
     export NVENCODEAPI_HEADER_DIR
+    export CUVIDDEC_HEADER_DIR
     export LD_LIBRARY_PATH="$NVCUVID_HEADER_DIR/../lib:$LD_LIBRARY_PATH"
 
     viivo &&
     echo "Set NVIDIA Video Codec SDK paths:"
     echo "NVCUVID_HEADER_DIR: $NVCUVID_HEADER_DIR"
     echo "NVENCODEAPI_HEADER_DIR: $NVENCODEAPI_HEADER_DIR"
+    echo "CUVIDDEC_HEADER_DIR: $CUVIDDEC_HEADER_DIR"
     echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
     viivo &&
     echo ""
@@ -477,7 +485,7 @@ if ! CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 cmake \
            -D OPENCV_GENERATE_PKGCONFIG=ON \
            -D CUDA_HOST_COMPILER=/usr/bin/gcc-11 \
            -D CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda \
-           -D CUDA_INCLUDE_DIRS=/usr/local/cuda/include \
+           -D CUDA_INCLUDE_DIRS="/usr/local/cuda/include;$CUVIDDEC_HEADER_DIR" \
            -D OpenGL_GL_PREFERENCE=GLVND \
            -D CMAKE_CXX_FLAGS="-Wno-deprecated-declarations -ftemplate-depth=1024 -Wno-error=deprecated-declarations -Wno-error=unused-parameter -D_GLIBCXX_USE_CXX11_ABI=0 -std=c++17" \
            -D CUDA_NVCC_FLAGS="-std=c++17 -Xcompiler -Wno-deprecated-declarations -Xcompiler -Wno-class-memaccess -D_FORCE_INLINES --expt-relaxed-constexpr -Wno-deprecated-gpu-targets" \
@@ -485,6 +493,7 @@ if ! CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 cmake \
            -D CMAKE_CXX_STANDARD=17 \
            -D NVCUVID_HEADER_DIR=$NVCUVID_HEADER_DIR \
            -D NVENCODEAPI_HEADER_DIR=$NVENCODEAPI_HEADER_DIR \
+           -D CUVIDDEC_HEADER_DIR=$CUVIDDEC_HEADER_DIR \
            -D OpenGL_GL_LIBRARIES="/usr/lib/x86_64-linux-gnu/libGL.so;/usr/lib/x86_64-linux-gnu/libGLU.so;/usr/lib/x86_64-linux-gnu/libGLEW.so;/usr/lib/x86_64-linux-gnu/libGLX.so" ..; then
     echo "CMake configuration failed."
     exit 1
