@@ -4,7 +4,8 @@
 #
 # >> June 22, 2024 <<
 #
-# ... this is a "note to self" compiler script for:
+# ... this is a "note to self" compile-install script for OpenCV w/ CUDA
+#
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # https://github.com/FlyingFathead/dvr-yolov8-detection/
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
