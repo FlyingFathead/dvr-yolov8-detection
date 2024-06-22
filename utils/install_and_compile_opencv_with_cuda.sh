@@ -491,8 +491,13 @@ if ! CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 cmake \
     exit 1
 fi
 
-# flags to try out
+# compile flags to try out:
+#
 #            -D ENABLE_OPTIONAL_MODULES=OFF \
+#
+# if i.e. tesseract (for OCR) isn't needed:
+#
+#            -D BUILD_opencv_text=OFF
 
 # Compile OpenCV
 viivo
