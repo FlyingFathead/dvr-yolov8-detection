@@ -417,6 +417,7 @@ if ! CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 cmake \
            -D BUILD_EXAMPLES=ON \
            -D BUILD_opencv_apps=ON \
            -D BUILD_opencv_ts=ON \
+           -D BUILD_opencv_rgbd=OFF \
            -D BUILD_SHARED_LIBS=ON \
            -D WITH_OPENGL=ON \
            -D WITH_OPENCL=ON \
@@ -440,6 +441,9 @@ if ! CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 cmake \
     echo "CMake configuration failed."
     exit 1
 fi
+
+# flags to try out
+#            -D ENABLE_OPTIONAL_MODULES=OFF \
 
 # Compile OpenCV
 viivo
