@@ -8,14 +8,6 @@
 #
 # Requires Debian/Ubuntu-based Linux to run.
 
-# Specify the GCC version for compiling
-# CC=/usr/bin/gcc-11
-# CXX=/usr/bin/g++-11
-
-# Set environment variables
-# export CXXFLAGS="-D_GLIBCXX_USE_CXX11_ABI=0"
-# export CFLAGS="-D_GLIBCXX_USE_CXX11_ABI=0"
-
 # options
 SKIP_INSTALL_PACKAGES=false
 
@@ -481,4 +473,3 @@ viivo
 echo "::: OpenCV installed with CUDA support."
 viivo
 cd ../../
-
