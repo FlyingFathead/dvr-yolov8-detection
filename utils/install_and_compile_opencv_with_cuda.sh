@@ -49,10 +49,6 @@ export PATH="/usr/local/cuda/bin:$PATH"
 export LD_LIBRARY_PATH="/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH"
 echo "CUDA and OpenCL paths added to PATH and LD_LIBRARY_PATH."
 
-# Verify which libOpenCL is being used
-echo "Checking linked libraries for your binary:"
-ldd path/to/your/binary | grep libOpenCL
-
 # Check available libOpenCL libraries
 echo "Available libOpenCL libraries:"
 ldconfig -p | grep libOpenCL
