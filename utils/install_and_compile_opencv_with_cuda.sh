@@ -247,15 +247,15 @@ function update_or_clone_repo() {
 }
 
 function locate_nv_sdk_headers() {
-    # Prefer /usr/local/cuda-12.4 paths
-    if [ -f /usr/local/cuda-12.4/targets/x86_64-linux/include/nvcuvid.h ] && 
-       [ -f /usr/local/cuda-12.4/targets/x86_64-linux/include/nvEncodeAPI.h ] && 
+    # Prefer $HOME/opencv_build paths
+    if [ -f $HOME/opencv_build/SDK/Video_Codec_SDK_12.2.72/Interface/nvcuvid.h ] && 
+       [ -f $HOME/opencv_build/SDK/Video_Codec_SDK_12.2.72/Interface/nvEncodeAPI.h ] && 
        [ -f $HOME/opencv_build/SDK/Video_Codec_SDK_12.2.72/Interface/cuviddec.h ]; then
-        NVCUVID_HEADER_DIR="/usr/local/cuda-12.4/targets/x86_64-linux/include"
-        NVENCODEAPI_HEADER_DIR="/usr/local/cuda-12.4/targets/x86_64-linux/include"
+        NVCUVID_HEADER_DIR="$HOME/opencv_build/SDK/Video_Codec_SDK_12.2.72/Interface"
+        NVENCODEAPI_HEADER_DIR="$HOME/opencv_build/SDK/Video_Codec_SDK_12.2.72/Interface"
         CUVIDDEC_HEADER_DIR="$HOME/opencv_build/SDK/Video_Codec_SDK_12.2.72/Interface"
     else
-        # Fall back to /usr/include if not found in /usr/local/cuda-12.4
+        # Fall back to /usr/include if not found in $HOME/opencv_build
         nvcuvid_path=$(locate nvcuvid.h | grep -m 1 "/usr/include/ffnvcodec" || locate nvcuvid.h | grep -m 1 "/usr/local/include/ffnvcodec")
         nvencodeapi_path=$(locate nvEncodeAPI.h | grep -m 1 "/usr/include/ffnvcodec" || locate nvEncodeAPI.h | grep -m 1 "/usr/local/include/ffnvcodec")
         cuviddec_path=$(locate cuviddec.h | grep -m 1 "/usr/include/ffnvcodec" || locate cuviddec.h | grep -m 1 "/usr/local/include/ffnvcodec")
@@ -431,7 +431,7 @@ function check_gcc_version() {
 # echo "Both CUDA and GCC versions are compatible. Proceeding with OpenCV build..."
 # viivo &&
 
-# Run CMake configuration with updated flags
+# Running CMake configuration
 viivo &&
 echo "Running CMake configuration..." &&
 viivo &&
@@ -478,19 +478,14 @@ if ! CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 cmake \
            -D WITH_QT=ON \
            -D WITH_GLEW=ON \
            -D GLEW_LIBRARY=/usr/lib/x86_64-linux-gnu/libGLEW.so \
-           -D OPENCV_GENERATE_PKGCONFIG=ON \
-           -D CUDA_HOST_COMPILER=/usr/bin/gcc-11 \
-           -D CUDA_TOOLKIT_ROOT_DIR=/usr/local/cuda \
-           -D CUDA_INCLUDE_DIRS="/usr/local/cuda/include;$CUVIDDEC_HEADER_DIR" \
+           -D NVCUVID_HEADER_DIR=$NVCUVID_HEADER_DIR \
+           -D NVENCODEAPI_HEADER_DIR=$NVENCODEAPI_HEADER_DIR \
+           -D CUVIDDEC_HEADER_DIR=$CUVIDDEC_HEADER_DIR \
            -D OpenGL_GL_PREFERENCE=GLVND \
            -D CMAKE_CXX_FLAGS="-Wno-deprecated-declarations -ftemplate-depth=1024 -Wno-error=deprecated-declarations -Wno-error=unused-parameter -D_GLIBCXX_USE_CXX11_ABI=0 -std=c++17" \
            -D CUDA_NVCC_FLAGS="-std=c++17 -Xcompiler -Wno-deprecated-declarations -Xcompiler -Wno-class-memaccess -D_FORCE_INLINES --expt-relaxed-constexpr -Wno-deprecated-gpu-targets" \
            -D CMAKE_C_FLAGS="-Wno-error=deprecated-declarations -Wno-error=unused-parameter" \
-           -D CMAKE_CXX_STANDARD=17 \
-           -D NVCUVID_HEADER_DIR=$NVCUVID_HEADER_DIR \
-           -D NVENCODEAPI_HEADER_DIR=$NVENCODEAPI_HEADER_DIR \
-           -D CUVIDDEC_HEADER_DIR=$CUVIDDEC_HEADER_DIR \
-           -D OpenGL_GL_LIBRARIES="/usr/lib/x86_64-linux-gnu/libGL.so;/usr/lib/x86_64-linux-gnu/libGLU.so;/usr/lib/x86_64-linux-gnu/libGLEW.so;/usr/lib/x86_64-linux-gnu/libGLX.so" ..; then
+           -D CMAKE_CXX_STANDARD=17 ..; then
     echo "CMake configuration failed."
     exit 1
 fi
