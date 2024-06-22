@@ -1,7 +1,13 @@
 #!/bin/bash
+#
 # install_and_compile_opencv_with_cuda.sh
 #
 # >> June 22, 2024 <<
+#
+# ... this is a "note to self" compiler script for:
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# https://github.com/FlyingFathead/dvr-yolov8-detection/
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
 # This script installs and compiles OpenCV from git source with CUDA support.
 # (Or at least attempts to.)
@@ -242,19 +248,57 @@ function update_or_clone_repo() {
     fi
 }
 
-function check_nv_sdk_headers() {
-    if [ ! -f /usr/local/cuda/NVIDIA-Video-SDK/include/nvcuvid.h ] || [ ! -f /usr/local/cuda/NVIDIA-Video-SDK/include/nvEncodeAPI.h ]; then
-        echo "NVIDIA Video Codec SDK headers not found. Please download and install them from the NVIDIA website."
-        echo "Download from: https://developer.nvidia.com/nvidia-video-codec-sdk"
-        echo "Extract the contents to /usr/local/cuda/NVIDIA-Video-SDK"
-        exit 1
+function locate_nv_sdk_headers() {
+    # Prefer /usr/local/cuda-12.4 paths
+    if [ -f /usr/local/cuda-12.4/targets/x86_64-linux/include/nvcuvid.h ] && [ -f /usr/local/cuda-12.4/targets/x86_64-linux/include/nvEncodeAPI.h ]; then
+        NVCUVID_HEADER_DIR="/usr/local/cuda-12.4/targets/x86_64-linux/include"
+        NVENCODEAPI_HEADER_DIR="/usr/local/cuda-12.4/targets/x86_64-linux/include"
+    else
+        # Fall back to /usr/include if not found in /usr/local/cuda-12.4
+        nvcuvid_path=$(locate nvcuvid.h | grep -m 1 "/usr/include/ffnvcodec" || locate nvcuvid.h | grep -m 1 "/usr/local/include/ffnvcodec")
+        nvencodeapi_path=$(locate nvEncodeAPI.h | grep -m 1 "/usr/include/ffnvcodec" || locate nvEncodeAPI.h | grep -m 1 "/usr/local/include/ffnvcodec")
+        
+        if [ -z "$nvcuvid_path" ] || [ -z "$nvencodeapi_path" ]; then
+            viivo &&
+            echo "NVIDIA Video Codec SDK headers not found. Please download and install them from the NVIDIA website."
+            echo "Download from: https://developer.nvidia.com/nvidia-video-codec-sdk"
+            viivo &&
+            echo ""
+            exit 1
+        fi
+
+        NVCUVID_HEADER_DIR=$(dirname "$nvcuvid_path")
+        NVENCODEAPI_HEADER_DIR=$(dirname "$nvencodeapi_path")
     fi
+
+    viivo &&
+    echo "Found NVIDIA Video Codec SDK headers:"
+    echo "nvcuvid.h: $NVCUVID_HEADER_DIR/nvcuvid.h"
+    echo "nvEncodeAPI.h: $NVENCODEAPI_HEADER_DIR/nvEncodeAPI.h"
+    viivo &&
+    echo ""
 }
 
 function set_nv_sdk_paths() {
-    export NVCUVID_HEADER_DIR="/usr/local/cuda/NVIDIA-Video-SDK/include"
-    export NVENCODEAPI_HEADER_DIR="/usr/local/cuda/NVIDIA-Video-SDK/include"
+    export NVCUVID_HEADER_DIR
+    export NVENCODEAPI_HEADER_DIR
+    export LD_LIBRARY_PATH="$NVCUVID_HEADER_DIR/../lib:$LD_LIBRARY_PATH"
+
+    viivo &&
+    echo "Set NVIDIA Video Codec SDK paths:"
+    echo "NVCUVID_HEADER_DIR: $NVCUVID_HEADER_DIR"
+    echo "NVENCODEAPI_HEADER_DIR: $NVENCODEAPI_HEADER_DIR"
+    echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+    viivo &&
+    echo ""
 }
+
+# Pre-check
+# Locate NVIDIA Video Codec SDK headers
+locate_nv_sdk_headers &&
+
+# Set NVIDIA Video Codec SDK paths
+set_nv_sdk_paths &&
 
 # Introductory message
 viivo &&
@@ -437,6 +481,8 @@ if ! CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 cmake \
            -D CUDA_NVCC_FLAGS="-std=c++17 -Xcompiler -Wno-deprecated-declarations -Xcompiler -Wno-class-memaccess -D_FORCE_INLINES --expt-relaxed-constexpr -Wno-deprecated-gpu-targets" \
            -D CMAKE_C_FLAGS="-Wno-error=deprecated-declarations -Wno-error=unused-parameter" \
            -D CMAKE_CXX_STANDARD=17 \
+           -D NVCUVID_HEADER_DIR=$NVCUVID_HEADER_DIR \
+           -D NVENCODEAPI_HEADER_DIR=$NVENCODEAPI_HEADER_DIR \
            -D OpenGL_GL_LIBRARIES="/usr/lib/x86_64-linux-gnu/libGL.so;/usr/lib/x86_64-linux-gnu/libGLU.so;/usr/lib/x86_64-linux-gnu/libGLEW.so;/usr/lib/x86_64-linux-gnu/libGLX.so" ..; then
     echo "CMake configuration failed."
     exit 1
