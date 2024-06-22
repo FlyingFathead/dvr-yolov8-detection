@@ -203,6 +203,7 @@ function install_packages() {
         gcc-11 g++-11 
         opencl-headers mesa-common-dev
         libgl1-mesa-dev libglu1-mesa-dev freeglut3-dev
+        libtesseract-dev libleptonica-dev
     )
 
     failed_packages=()
