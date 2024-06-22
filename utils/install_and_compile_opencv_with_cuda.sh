@@ -482,7 +482,7 @@ if ! CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 cmake \
            -D NVENCODEAPI_HEADER_DIR=$NVENCODEAPI_HEADER_DIR \
            -D CUVIDDEC_HEADER_DIR=$CUVIDDEC_HEADER_DIR \
            -D OpenGL_GL_PREFERENCE=GLVND \
-           -D CMAKE_CXX_FLAGS="-Wno-deprecated-declarations -ftemplate-depth=1024 -Wno-error=deprecated-declarations -Wno-error=unused-parameter -D_GLIBCXX_USE_CXX11_ABI=0 -std=c++17" \
+           -D CMAKE_CXX_FLAGS="-Wno-deprecated-declarations -ftemplate-depth=1024 -Wno-error=deprecated-declarations -Wno-error=unused-parameter -D_GLIBCXX_USE_CXX11_ABI=0 -std=c++17 -I$CUVIDDEC_HEADER_DIR" \
            -D CUDA_NVCC_FLAGS="-std=c++17 -Xcompiler -Wno-deprecated-declarations -Xcompiler -Wno-class-memaccess -D_FORCE_INLINES --expt-relaxed-constexpr -Wno-deprecated-gpu-targets" \
            -D CMAKE_C_FLAGS="-Wno-error=deprecated-declarations -Wno-error=unused-parameter" \
            -D CMAKE_CXX_STANDARD=17 ..; then
