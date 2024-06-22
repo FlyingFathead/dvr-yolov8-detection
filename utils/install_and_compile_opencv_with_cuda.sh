@@ -14,6 +14,7 @@
 # (Or at least attempts to.)
 #
 # Requires Debian/Ubuntu-based Linux to run.
+# TIP: You can run the script with a `-s` flag to skip the apt package installs.
 
 # options
 SKIP_INSTALL_PACKAGES=false
