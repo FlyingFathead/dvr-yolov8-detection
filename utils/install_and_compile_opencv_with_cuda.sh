@@ -205,7 +205,7 @@ function install_packages() {
         libqt6core5compat6 libqt6core5compat6-dev
         libnvidia-decode-${driver_version} libnvidia-encode-${driver_version}
         gcc-11 g++-11 
-        opencl-headers
+        opencl-headers mesa-common-dev
         libgl1-mesa-dev libglu1-mesa-dev freeglut3-dev
     )
 
