@@ -509,7 +509,7 @@ if ! make -j$(nproc); then
 fi
 
 # Install OpenCV with confirmation prompt
-viivo 
+viivo
 echo "::: Ready to install OpenCV. Do you want to proceed? (yes/no)"
 read -r response
 if [[ "$response" == "yes" ]]; then
