@@ -207,8 +207,8 @@ def announce_detection():
 # Function to save detection image
 def save_detection_image(frame, detection_count):
     try:
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        filename = os.path.join(SAVE_DIR, f"detection_{detection_count}_{timestamp}.{IMAGE_FORMAT}")
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")  # Format timestamp as YYYYMMDD-HHMMSS
+        filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}.{IMAGE_FORMAT}")  # Modified format
         cv2.imwrite(filename, frame)
         logging.info(f"Saved detection image: {filename}")
     except Exception as e:
