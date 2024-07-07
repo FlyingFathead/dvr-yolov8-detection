@@ -195,7 +195,7 @@ Developed by [FlyingFathead](https://github.com/FlyingFathead), with the usual d
 
 - The main real-time detection program does have a check on startup that prints out whether or not CUDA has been found and which GPU is in use, it can be useful for checking out your CUDA support status.
 
-- Good luck!
+- Good luck! _(you'll need it, and patience)_
 
 ### What if I don't have a CUDA-capable GPU?
 - You can still run the program in CPU-only mode, although it will be _extremely_ sluggish (don't expect too many frames per second). Should the model be too heavy to run on your computer, you can try changing it to a smaller one in the `config.ini` or even trying some of the rescale and frame rate options, although they are not always optimal either, as rescaling adds an extra step -- if possible, reduce the resolution and frame rate from your device's end, or, if you're using OBS Studio, from its output settings.
