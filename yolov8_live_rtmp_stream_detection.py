@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 #
 # yolov8_live_rtmp_stream_detection.py
-# June 20 // 2024
+# July 7 // 2024
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.1402
+version_number = 0.15
 
 import cv2
 import torch
@@ -45,6 +45,8 @@ config = load_config()
 # Assign configurations to variables
 DEFAULT_CONF_THRESHOLD = config.getfloat('general', 'default_conf_threshold')
 DEFAULT_MODEL_VARIANT = config.get('general', 'default_model_variant')
+USE_WEBCAM = config.getboolean('input', 'use_webcam', fallback=False)
+WEBCAM_INDEX = config.getint('input', 'webcam_index', fallback=0)
 STREAM_URL = config.get('stream', 'stream_url')
 DRAW_RECTANGLES = config.getboolean('detection', 'draw_rectangles')
 SAVE_DETECTIONS = config.getboolean('detection', 'save_detections')
@@ -225,48 +227,53 @@ def cuda_denoising_available():
         return False
 
 # Frame capture thread
-def frame_capture_thread(stream_url, frame_queue, stop_event):
+def frame_capture_thread(stream_url, use_webcam, webcam_index, frame_queue, stop_event):
     retries = 0
     cap = None
 
-    while retries < MAX_RETRIES:
-        logging.info(f"Attempting to open video stream: {stream_url}")
+    if use_webcam:
+        logging.info(f"Using webcam with index {webcam_index}")
+        cap = cv2.VideoCapture(webcam_index)
+    else:
+        while retries < MAX_RETRIES:
+            logging.info(f"Attempting to open video stream: {stream_url}")
 
-        # Set FFmpeg options
-        ffmpeg_options = {
-            'rtmp_buffer': '1000',  # Increase buffer size
-            'max_delay': '5000000',  # Increase maximum delay
-            'stimeout': '5000000'  # Socket timeout
-        }
-        options = ' '.join([f'-{k} {v}' for k, v in ffmpeg_options.items()])
-        cap = cv2.VideoCapture(f'{stream_url} {options}')
+            # Set FFmpeg options
+            ffmpeg_options = {
+                'rtmp_buffer': '1000',  # Increase buffer size
+                'max_delay': '5000000',  # Increase maximum delay
+                'stimeout': '5000000'  # Socket timeout
+            }
+            options = ' '.join([f'-{k} {v}' for k, v in ffmpeg_options.items()])
+            cap = cv2.VideoCapture(f'{stream_url} {options}')
 
-        # Set the timeout for the video stream
-        cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, TIMEOUT * 1000)
-        cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, TIMEOUT * 1000)
+            # Set the timeout for the video stream
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, TIMEOUT * 1000)
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, TIMEOUT * 1000)
 
-        if cap.isOpened():
-            logging.info("Successfully opened video stream.")
-            break
-        else:
-            logging.error(f"Unable to open video stream: {stream_url}. Retrying in {RETRY_DELAY} seconds...")
-            time.sleep(RETRY_DELAY)
-            retries += 1
+            if cap.isOpened():
+                logging.info("Successfully opened video stream.")
+                break
+            else:
+                logging.error(f"Unable to open video stream: {stream_url}. Retrying in {RETRY_DELAY} seconds...")
+                time.sleep(RETRY_DELAY)
+                retries += 1
 
     if cap is None or not cap.isOpened():
-        logging.error(f"Failed to open video stream: {stream_url} after {MAX_RETRIES} retries.")
+        logging.error(f"Failed to open video source after {MAX_RETRIES} retries.")
         return
 
     while not stop_event.is_set():
         ret, frame = cap.read()
         if not ret:
-            logging.warning("Failed to read frame from stream.")
+            logging.warning("Failed to read frame from source.")
             time.sleep(1)
             continue
         frame_queue.put(frame)
 
     cap.release()
-    logging.info("Video stream closed.")
+    logging.info("Video source closed.")
+
 
 # Frame processing thread
 def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectangles, denoise, process_fps, use_process_fps, detection_ongoing):
@@ -379,6 +386,8 @@ if __name__ == "__main__":
     log_cuda_info()  # Add this line
     parser = argparse.ArgumentParser(description="YOLOv8 RTMP Stream Human Detection")
     parser.add_argument("--stream_url", type=str, default=STREAM_URL, help="URL of the RTMP stream")
+    parser.add_argument("--use_webcam", type=bool, default=USE_WEBCAM, help="Use webcam for video input")
+    parser.add_argument("--webcam_index", type=int, default=0, help="Index number of the webcam to use")
     parser.add_argument("--conf_threshold", type=float, default=DEFAULT_CONF_THRESHOLD, help="Confidence threshold for detections")
     parser.add_argument("--model_variant", type=str, default=DEFAULT_MODEL_VARIANT, help="YOLOv8 model variant to use")
     parser.add_argument("--draw_rectangles", type=bool, default=DRAW_RECTANGLES, help="Draw rectangles around detected objects")
@@ -397,6 +406,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     STREAM_URL = args.stream_url
+    USE_WEBCAM = args.use_webcam
+    WEBCAM_INDEX = args.webcam_index    
     DRAW_RECTANGLES = args.draw_rectangles
     SAVE_DETECTIONS = args.save_detections
     IMAGE_FORMAT = args.image_format
@@ -421,7 +432,7 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Initialize threads
-    capture_thread = Thread(target=frame_capture_thread, args=(STREAM_URL, frame_queue, stop_event))
+    capture_thread = Thread(target=frame_capture_thread, args=(STREAM_URL, USE_WEBCAM, WEBCAM_INDEX, frame_queue, stop_event))
     processing_thread = Thread(target=frame_processing_thread, args=(frame_queue, stop_event, args.conf_threshold, DRAW_RECTANGLES, DENOISE, PROCESS_FPS, USE_PROCESS_FPS, detection_ongoing))
 
     try:

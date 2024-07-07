@@ -2,8 +2,9 @@
 
 - Real-time human / animal / object detection and alert system
 - Runs on Python + YOLOv8 + OpenCV2
-- Takes in RTMP streams for real-time video processing sources
+- Supports RTMP streams for real-time video processing sources
    - (a loopback example included for use with i.e. OBS Studio)
+- Supports USB webcams for video source
 - Supports CUDA GPU acceleration
 - Detections can be automatically saved to images with a detection log
 - Separate tool included for offline video file detections
@@ -18,19 +19,20 @@ The real-time detection also supports additional CUDA features such as CUDA vide
 
 ## Features
 
-- Real-time object detection from RTMP streams
+- Real-time object detection from RTMP streams or USB webcams
    - The source can be any RTMP stream (i.e. an IP camera, DVR that streams RTMP video, etc.)
-   - Use any USB webcam/video feed as a source w/ OSB Studio + RTMP loopback
+   - Use any USB webcam as a source directly or via a RTMP loopback
 - Audio alerts for real-time detections over TTS using `pyttsx3`   
 - Batch processing mode for video files for offline object/human/animal detection.
 
 - Configurable features via `config.ini`, i.e.:
+   - Your USB webcam or RTMP video source
    - Confidence threshold for detections
    - Skip rescaling of video frames
    - Log detection details into a separate log file
    - Save frames with detected objects as image files
    - Model variant selection (i.e. YOLOv8n, YOLOv8s, YOLOv8m, etc.)
-   - Plenty of other options tho choose from...
+   - Plenty of other options to choose from...
 
 ## Requirements
 
@@ -83,22 +85,32 @@ This approach ensures that the dependencies are managed through the `requirement
      ```
    - On Windows and macOS, follow the instructions on the [FFmpeg download page](https://ffmpeg.org/download.html).
 
-## Real-Time RTMP Stream Detection
+## Real-Time Detection
 
-This project also supports real-time object detection from an RTMP stream using YOLOv8. The provided `run_detection.sh` script ensures the detection script runs continuously, automatically restarting if it exits.
+This project supports real-time object detection from RTMP streams or USB webcams using YOLOv8. The provided `run_detection.sh` script ensures the detection script runs continuously, automatically restarting if it exits.
 
 ### Usage
 
-1. **Ensure your RTMP server is set up and streaming:**
-   - The example configuration (`example-nginx.conf`) can be used to set up an RTMP server with NGINX, for use cases where you need to redirect i.e. an USB webcam (or literally any video source using i.e. OBS Studio) to run the detection in real-time.   
+1. **For RTMP Stream:**
+   - Ensure your RTMP server is set up and streaming:
+     - The example configuration (`example-nginx.conf`) can be used to set up an RTMP server with NGINX, for use cases where you need to redirect i.e. a USB webcam (or literally any video source using i.e. OBS Studio) to run the detection in real-time.   
 
-2. **Run the detection script:**
+   - Run the detection script:
 
-   ```bash
-   ./run_detection.sh
-   ```
+     ```bash
+     ./run_detection.sh
+     ```
 
-The `run_detection.sh` bash script will continuously run `yolov8_live_rtmp_stream_detection.py`, restarting it automatically if it exits.
+   The `run_detection.sh` bash script will continuously run `yolov8_live_rtmp_stream_detection.py`, restarting it automatically if it exits.
+
+2. **For USB Webcams:**
+   - Run the detection script with the `--use_webcam` option:
+
+     ```bash
+     python3 yolov8_live_rtmp_stream_detection.py --use_webcam --webcam_index X
+     ```
+
+   Replace `X` with the index of your webcam. You can use the `utils/get_webcams.py` tool to find the available webcams and their index numbers on your system.
 
 ### Configuration
 
@@ -144,13 +156,17 @@ pip install -U ffmpeg-python
    rtmp://127.0.0.1:1935/live
    ```
 
-This setup will ensure that OBS streams to `rtmp://127.0.0.1:1935/live`, and the loopback script will forward it to `rtmp://127.0.0.1:1935/live/stream`, which your detection script will then process.
+This setup will ensure that OBS streams to `rtmp://127.0.0.1:1935/live`, and the loopback script will forward it to `rtmp://127.0.0.1:1935/live/stream`, which your detection script will then process. However, using i.e. Nginx as a loopback method is highly recommended for stability.
 
 # Offline Batch Detection
 
 You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on video files, suitable for offline use if you need to go through pre-existing video files.
 
 ## Changes
+- v0.15 - webcam support added!
+   - you can edit the `config.ini` and set the input to webcam
+   - or, run the main program with: `--use_webcam --webcam_index X` (where X is your webcam index)
+   - added `utils/get_webcams.py` - a tool that you can run to check for available webcams and their index numbers
 - v0.1402 - detection logging into a file added
 - v0.1401 - configparser added; now configurable via `config.ini`
 - v0.140 - more double-checking as to configuration options and their availability
