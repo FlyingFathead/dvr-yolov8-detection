@@ -112,6 +112,40 @@ An example NGINX configuration is provided in `example-nginx.conf`. This config 
 
 To stream and process the video in real-time, the `ffmpeg_video_stream_loopback.sh` script can be used. If using a streaming suite such as OBS Studio, ensure that your OBS Studio or streaming client is set to stream to `rtmp://127.0.0.1:1935/live`.
 
+### Windows Users / Quick Platform-Agnostic Loopback
+
+You can run the `loopback_test_unit_ffmpeg-python.py` script located in the `utils/` directory to set up a loopback for your RTMP stream.
+
+#### Prerequisites
+Make sure you have the `ffmpeg-python` module installed. You can install it with:
+
+```bash
+pip install ffmpeg-python
+```
+
+#### Running the Loopback Script
+1. Run the loopback script in one terminal window:
+
+   ```bash
+   python3 utils/loopback_test_unit_ffmpeg-python.py
+   ```
+
+2. Leave that terminal window **active and running**.
+
+3. Open another terminal window and run the main program:
+
+   ```bash
+   python3 yolov8_live_rtmp_stream_detection.py
+   ```
+
+4. Configure your OBS Studio's video stream output to:
+
+   ```plaintext
+   rtmp://127.0.0.1:1935/live
+   ```
+
+This setup will ensure that OBS streams to `rtmp://127.0.0.1:1935/live`, and the loopback script will forward it to `rtmp://127.0.0.1:1935/live/stream`, which your detection script will then process.
+
 # Offline Batch Detection
 
 You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on video files, suitable for offline use if you need to go through pre-existing video files.
