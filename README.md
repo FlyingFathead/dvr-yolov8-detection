@@ -91,7 +91,7 @@ This project supports real-time object detection from RTMP streams or USB webcam
 
 ### Usage
 
-1. **For RTMP Stream:**
+1. **For RTMP Streams:**
    - Ensure your RTMP server is set up and streaming:
      - The example configuration (`example-nginx.conf`) can be used to set up an RTMP server with NGINX, for use cases where you need to redirect i.e. a USB webcam (or literally any video source using i.e. OBS Studio) to run the detection in real-time.   
 
@@ -110,7 +110,9 @@ This project supports real-time object detection from RTMP streams or USB webcam
      python3 yolov8_live_rtmp_stream_detection.py --use_webcam --webcam_index X
      ```
 
-   Replace `X` with the index of your webcam. You can use the `utils/get_webcams.py` tool to find the available webcams and their index numbers on your system.
+   Replace `X` with the index of your webcam. Use the `utils/get_webcams.py` tool to find the available webcams and their index numbers on your system if needed.
+
+   You can also adjust the webcam source as your default by editing the `config.ini` and setting the `use_webcam` flag to `true` -- don't forget to add your appropriate webcam index to the `webcam_index` config flag!
 
 ### Configuration
 
