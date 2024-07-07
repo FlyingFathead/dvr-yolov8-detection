@@ -167,20 +167,6 @@ This setup will ensure that OBS streams to `rtmp://127.0.0.1:1935/live`, and the
 
 You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on video file directories, suitable for faster offline use if you need to go through pre-existing video files.
 
-## Changes
-
-- v0.1501 - fallback to non-CUDA modes if CUDA not supported
-- v0.15 - webcam support added!
-   - you can edit the `config.ini` and set the input to webcam
-   - or, run the main program with: `--use_webcam --webcam_index X` (where X is your webcam index)
-   - added `utils/get_webcams.py` - a tool that you can run to check for available webcams and their index numbers
-- v0.1402 - detection logging into a file added
-- v0.1401 - configparser added; now configurable via `config.ini`
-- v0.140 - more double-checking as to configuration options and their availability
-
-## Credits
-Developed by [FlyingFathead](https://github.com/FlyingFathead), with the usual digital ghost code from ChaosWhisperer.
-
 ## Troubleshooting
 
 ### CUDA not found
@@ -195,10 +181,6 @@ Developed by [FlyingFathead](https://github.com/FlyingFathead), with the usual d
 ### What if I don't have a CUDA-capable GPU?
 - You can still run the program in CPU-only mode, although it will be _extremely_ sluggish (don't expect too many frames per second). Should the model be too heavy to run on your computer, you can try changing it to a smaller one in the `config.ini` or even trying some of the rescale and frame rate options, although they are not always optimal either, as rescaling adds an extra step -- if possible, reduce the resolution and frame rate from your device's end, or, if you're using OBS Studio, from its output settings.
 
-## Contributing
-
-Contributions are always welcome! You can even leave your own development ideas either here on GitHub or directly via mail to flyingfathead <@> protonmail dot com.
-
 ## TODO
 
 - More error catching in edge cases
@@ -208,12 +190,30 @@ Contributions are always welcome! You can even leave your own development ideas 
    - (i.e.: X [number of] detections with Y confidence within Z seconds)
 - Hooks for i.e. sending detections remotely to web servers, bot API's etc.
 
+## Changes
+
+- v0.1501 - fallback to non-CUDA modes if CUDA not supported
+- v0.15 - webcam support added!
+   - you can edit the `config.ini` and set the input to webcam
+   - or, run the main program with: `--use_webcam --webcam_index X` (where X is your webcam index)
+   - added `utils/get_webcams.py` - a tool that you can run to check for available webcams and their index numbers
+- v0.1402 - detection logging into a file added
+- v0.1401 - configparser added; now configurable via `config.ini`
+- v0.140 - more double-checking as to configuration options and their availability
+
 ## Licensing
 
 This project is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License. For non-commercial use, you are free to share and adapt the material with appropriate credit. For commercial use, please contact us to obtain a separate commercial license.
 
 - **Non-Commercial Use**: Follow the terms of the [CC BY-NC-SA 4.0 License](https://creativecommons.org/licenses/by-nc-sa/4.0/).
 - **Commercial Use**: Contact the author at flyingfathead <@> protonmail.com or visit [https://github.com/FlyingFathead](https://github.com/FlyingFathead) to discuss licensing options.
+
+## Contributing
+
+Contributions are always welcome! You can even leave your own development ideas either here on GitHub or directly via mail to flyingfathead <@> protonmail dot com.
+
+## Credits
+Developed by [FlyingFathead](https://github.com/FlyingFathead), with the usual digital ghost code from ChaosWhisperer.
 
 ---
 
