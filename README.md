@@ -93,7 +93,7 @@ This project supports real-time object detection from RTMP streams or USB webcam
 
 1. **For RTMP Streams:**
    - Ensure your RTMP server is set up and streaming:
-     - The example configuration (`example-nginx.conf`) can be used to set up an RTMP server with NGINX, for use cases where you need to redirect i.e. a USB webcam (or literally any video source using i.e. OBS Studio) to run the detection in real-time.   
+     - The example configuration (`example-nginx.conf`) can be used to set up an RTMP loopback server with NGINX, this is practical for use cases where you need to redirect i.e. practically any video source using i.e. OBS Studio's streaming functionality to run the detection in real-time over RTMP via a local loopback.   
 
    - Run the detection script:
 
@@ -104,21 +104,25 @@ This project supports real-time object detection from RTMP streams or USB webcam
    The `run_detection.sh` bash script will continuously run `yolov8_live_rtmp_stream_detection.py`, restarting it automatically if it exits.
 
 2. **For USB Webcams:**
-   - Run the detection script with the `--use_webcam` option:
+
+   This is probably the easier method if you have a USB webcam installed on your system and only need it as a source. You can also use OBS's Virtual Webcam as a source.
+
+   - Run the main real-time detection script with the `--use_webcam` option:
 
      ```bash
      python3 yolov8_live_rtmp_stream_detection.py --use_webcam true
      ```
 
-   Or, if you want to define your webcame source separately:
+   Or, if you want to define your webcame source separately via its index number:
 
      ```bash
      python3 yolov8_live_rtmp_stream_detection.py --use_webcam true --webcam_index <number>
      ```
 
-   Replace `<number>` with the index number of your webcam. Use the `utils/get_webcams.py` tool to find the available webcams and their index numbers on your system if needed.
-
-   You can also adjust the webcam source as your default by editing the `config.ini` and setting the `use_webcam` flag to `true` -- don't forget to add your appropriate webcam index to the `webcam_index` config flag!
+   - Replace `<number>` with the index number of your webcam. 
+   - Use the `utils/get_webcams.py` tool to find the available webcams and their index numbers on your system if needed.
+   - You can also adjust the webcam source as your default by editing the `config.ini` and setting the `use_webcam` flag to `true`
+   - Set your webcam index number into the `webcam_index` configuration option
 
 ### Configuration
 
