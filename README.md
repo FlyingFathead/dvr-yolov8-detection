@@ -120,7 +120,7 @@ You can run the `loopback_test_unit_ffmpeg-python.py` script located in the `uti
 Make sure you have the `ffmpeg-python` module installed. You can install it with:
 
 ```bash
-pip install ffmpeg-python
+pip install -U ffmpeg-python
 ```
 
 #### Running the Loopback Script
