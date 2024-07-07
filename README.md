@@ -124,9 +124,9 @@ This project supports real-time object detection from RTMP streams or USB webcam
    - You can also adjust the webcam source as your default by editing the `config.ini` and setting the `use_webcam` flag to `true`
    - Set your webcam index number into the `webcam_index` configuration option
 
-### Configuration
+### Program Configuration
 
-You can configure various parameters by editing the `config.ini` file, this allows you to set program parameters such as the input stream address, output directory, confidence threshold, model variant, stream URL, and more.
+You can configure various parameters by editing the `config.ini` file, this allows you to set program parameters such as the input source (USB webcam, RTMP stream), input stream address, output directory, confidence threshold, model variant, stream URL, and much more.
 
 ### Example NGINX Configuration
 
@@ -136,18 +136,16 @@ An example NGINX configuration is provided in `example-nginx.conf`. This config 
 
 To stream and process the video in real-time, the `ffmpeg_video_stream_loopback.sh` script can be used. If using a streaming suite such as OBS Studio, ensure that your OBS Studio or streaming client is set to stream to `rtmp://127.0.0.1:1935/live`.
 
-### Windows Users / Quick Platform-Agnostic Loopback
+### Windows Users / Quick Platform-Agnostic Loopback for RTMP
 
-You can run the `loopback_test_unit_ffmpeg-python.py` script located in the `utils/` directory to set up a loopback for your RTMP stream.
-
-#### Prerequisites
-Make sure you have the `ffmpeg-python` module installed. You can install it with:
+You can run the `loopback_test_unit_ffmpeg-python.py` script located in the `utils/` directory to set up a loopback for your RTMP stream. If you're using this option: Make sure you have the `ffmpeg-python` module installed. You can install it with:
 
 ```bash
 pip install -U ffmpeg-python
 ```
 
-#### Running the Loopback Script
+After you have the `ffmpeg-python` module installed:
+
 1. Run the loopback script in one terminal window:
 
    ```bash
@@ -170,11 +168,12 @@ pip install -U ffmpeg-python
 
 This setup will ensure that OBS streams to `rtmp://127.0.0.1:1935/live`, and the loopback script will forward it to `rtmp://127.0.0.1:1935/live/stream`, which your detection script will then process. However, using i.e. Nginx as a loopback method is highly recommended for stability.
 
-## Offline Batch Detection
+## Offline Batch Detection Utility
 
-You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on video files, suitable for offline use if you need to go through pre-existing video files.
+You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on video file directories, suitable for faster offline use if you need to go through pre-existing video files.
 
 ## Changes
+
 - v0.1501 - fallback to non-CUDA modes if CUDA not supported
 - v0.15 - webcam support added!
    - you can edit the `config.ini` and set the input to webcam
@@ -186,6 +185,33 @@ You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch d
 
 ## Credits
 Developed by [FlyingFathead](https://github.com/FlyingFathead), with the usual digital ghost code from ChaosWhisperer.
+
+## Troubleshooting
+
+### CUDA not found
+- Make sure that you have all the necessary modules installed with CUDA enabled. In many cases, enabling CUDA support might require you to compile OpenCV directly from source, which can be a daunting task especially for those with no prior experience. I have included my own OpenCV compile script [here](https://github.com/FlyingFathead/dvr-yolov8-detection/blob/main/utils/install_and_compile_opencv_with_cuda.sh), however I **do not recommend you run it** without understanding what it does. I have only used it to compile OpenCV with CUDA on a single Ubuntu Linux setup during summer 2024, so it's _not_ intended for everyone, and might already be outdated as you read this. Take what you will out of it at your own peril -- you have been warned.
+
+- There are multiple other guides online for compiling OpenCV with CUDA support, each with varying degrees of success.
+
+- The main real-time detection program does have a check on startup that prints out whether or not CUDA has been found and which GPU is in use, it can be useful for checking out your CUDA support status.
+
+- Good luck!
+
+### What if I don't have a CUDA-capable GPU?
+- You can still run the program in CPU-only mode, although it will be _extremely_ sluggish (don't expect too many frames per second). Should the model be too heavy to run on your computer, you can try changing it to a smaller one in the `config.ini` or even trying some of the rescale and frame rate options, although they are not always optimal either, as rescaling adds an extra step -- if possible, reduce the resolution and frame rate from your device's end, or, if you're using OBS Studio, from its output settings.
+
+## Contributing
+
+Contributions are always welcome! You can even leave your own development ideas either here on GitHub or directly via mail to flyingfathead <@> protonmail dot com.
+
+## TODO
+
+- More error catching in edge cases
+- Refactoring and added modularity
+- Setup scripts
+- Threshold for sending out audio & other alerts 
+   - (i.e.: X [number of] detections with Y confidence within Z seconds)
+- Hooks for i.e. sending detections remotely to web servers, bot API's etc.
 
 ## Licensing
 
