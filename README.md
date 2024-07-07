@@ -22,7 +22,8 @@ The real-time detection also supports additional CUDA features such as CUDA vide
 - Configurable features options via `config.ini` are i.e.:
    - Your USB webcam or RTMP video source
    - Confidence threshold for detections
-   - Skip rescaling of video frames
+   - Enable or disable rescaling of video frames
+   - CUDA-based video denoising (experimental)
    - Log detection details into a separate log file
    - Save frames with detected objects as image files
    - Model variant selection (i.e. YOLOv8n, YOLOv8s, YOLOv8m, etc.)
