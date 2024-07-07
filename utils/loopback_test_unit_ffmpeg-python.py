@@ -12,20 +12,22 @@ import logging
 def create_rtmp_server(source_url, output_url):
     while True:
         try:
-            # The process pulls from a source RTMP URL and pushes to a local RTMP URL
-            (
+            logging.info(f"Attempting to connect to {source_url}")
+            process = (
                 ffmpeg
-                .input(source_url, format='flv')
+                .input(source_url, format='flv', listen=1)  # 'listen=1' makes ffmpeg wait for input
                 .output(output_url, format='flv', vcodec='copy', acodec='copy')
                 .global_args('-loglevel', 'info')  # Set loglevel to info
-                .run(overwrite_output=True)
+                .run_async(overwrite_output=True)
             )
+            process.wait()
         except ffmpeg.Error as e:
-            logging.error(f"Error: {e.stderr.decode() if e.stderr else 'Unknown error'}")
-            time.sleep(5)  # Wait for 5 seconds before retrying
+            logging.error(f"FFmpeg error: {e.stderr.decode() if e.stderr else 'Unknown error'}")
         except Exception as e:
             logging.error(f"Unexpected error: {str(e)}")
-            time.sleep(5)  # Wait for 5 seconds before retrying
+        
+        logging.info("Waiting for stream to be available...")
+        time.sleep(5)  # Wait for 5 seconds before retrying
 
 if __name__ == "__main__":
     source_url = 'rtmp://127.0.0.1:1935/live'
