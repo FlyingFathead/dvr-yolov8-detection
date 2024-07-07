@@ -6,7 +6,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.15
+version_number = 0.1501
 
 import cv2
 import torch

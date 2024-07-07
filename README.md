@@ -107,10 +107,16 @@ This project supports real-time object detection from RTMP streams or USB webcam
    - Run the detection script with the `--use_webcam` option:
 
      ```bash
-     python3 yolov8_live_rtmp_stream_detection.py --use_webcam --webcam_index X
+     python3 yolov8_live_rtmp_stream_detection.py --use_webcam true
      ```
 
-   Replace `X` with the index of your webcam. Use the `utils/get_webcams.py` tool to find the available webcams and their index numbers on your system if needed.
+   Or, if you want to define your webcame source separately:
+
+     ```bash
+     python3 yolov8_live_rtmp_stream_detection.py --use_webcam true --webcam_index <number>
+     ```
+
+   Replace `<number>` with the index number of your webcam. Use the `utils/get_webcams.py` tool to find the available webcams and their index numbers on your system if needed.
 
    You can also adjust the webcam source as your default by editing the `config.ini` and setting the `use_webcam` flag to `true` -- don't forget to add your appropriate webcam index to the `webcam_index` config flag!
 
@@ -165,6 +171,7 @@ This setup will ensure that OBS streams to `rtmp://127.0.0.1:1935/live`, and the
 You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on video files, suitable for offline use if you need to go through pre-existing video files.
 
 ## Changes
+- v0.1501 - fallback to non-CUDA modes if CUDA not supported
 - v0.15 - webcam support added!
    - you can edit the `config.ini` and set the input to webcam
    - or, run the main program with: `--use_webcam --webcam_index X` (where X is your webcam index)
