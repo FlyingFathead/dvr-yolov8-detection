@@ -11,21 +11,15 @@
 
 ## Overview
 
-This project leverages YOLOv8 and OpenCV2 to perform object detection on either real-time video streams or batches of video files. It processes each video frame by frame, detects humans (by default; other specified objects can be added in as well), and logs the detections. Additionally, it saves frames with detected objects/entities highlighted.
+This project leverages YOLOv8 and OpenCV2 to perform object detection on either real-time video streams or batches of video files. It processes each video frame by frame, detects humans (by default; other specified and YOLOv8 supported types/objects can be added in as needed). The program can log the detections into a separate log file and additionally, save the detection frames with detected objects/entities highlighted and can send out an audio alert on detections via `pyttsx3`.
+
+Please see the `config.ini` for configuration options.
 
 CUDA enabled OpenCV2 is recommended for faster operation. **Note: CUDA-enabled OpenCV2 needs to be compiled manually and installed separately and the compiling process is highly dependent on your hardware setup, so I will not post separate guides on the compile process here.**
 
 The real-time detection also supports additional CUDA features such as CUDA video denoising (note: requires CUDA compiled from source).
 
-## Features
-
-- Real-time object detection from RTMP streams or USB webcams
-   - The source can be any RTMP stream (i.e. an IP camera, DVR that streams RTMP video, etc.)
-   - Use any USB webcam as a source directly or via a RTMP loopback
-- Audio alerts for real-time detections over TTS using `pyttsx3`   
-- Batch processing mode for video files for offline object/human/animal detection.
-
-- Configurable features via `config.ini`, i.e.:
+- Configurable features options via `config.ini` are i.e.:
    - Your USB webcam or RTMP video source
    - Confidence threshold for detections
    - Skip rescaling of video frames
