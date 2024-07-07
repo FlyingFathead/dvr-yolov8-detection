@@ -115,7 +115,13 @@ tts_stop_event = Event()
 def load_model(model_variant=DEFAULT_MODEL_VARIANT):
     try:
         model = YOLO(model_variant)
-        model.to('cuda')
+        # Check if CUDA is available
+        if torch.cuda.is_available():
+            model.to('cuda')
+            main_logger.info("Using CUDA for model inference.")
+        else:
+            model.to('cpu')
+            main_logger.warning("CUDA not available, using CPU for model inference.")
         return model
     except Exception as e:
         logging.error(f"Error loading model {model_variant}: {e}")
