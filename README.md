@@ -193,7 +193,7 @@ You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch d
 ## Changes
 
 - v0.1501 - fallback to non-CUDA modes if CUDA not supported
-- v0.15 - webcam support added!
+- v0.15 - direct USB webcam support added!
    - you can edit the `config.ini` and set the input to webcam
    - or, run the main program with: `--use_webcam --webcam_index X` (where X is your webcam index)
    - added `utils/get_webcams.py` - a tool that you can run to check for available webcams and their index numbers
