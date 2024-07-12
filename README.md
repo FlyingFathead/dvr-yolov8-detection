@@ -15,7 +15,7 @@ This project leverages YOLOv8 and OpenCV2 to perform object detection on either 
 
 Please see the `config.ini` for configuration options.
 
-CUDA enabled OpenCV2 is recommended for faster operation. **Note: CUDA-enabled OpenCV2 needs to be compiled manually and installed separately and the compiling process is highly dependent on your hardware setup, so I will not post separate guides on the compile process here.**
+Using CUDA-enabled OpenCV is recommended for faster operation. **Note: CUDA-enabled OpenCV2 needs to be compiled manually and installed separately and the compiling process is highly dependent on your hardware setup. You can look up the "Troubleshooting" portion of this page for some generic advice and an example build script for OpenCV with CUDA.**
 
 The real-time detection also supports additional CUDA features such as CUDA video denoising (note: requires CUDA compiled from source).
 
