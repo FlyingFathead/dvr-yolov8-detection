@@ -170,7 +170,9 @@ You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch d
 ## Troubleshooting
 
 ### CUDA not found
-- Make sure that you have all the necessary modules installed with CUDA enabled. In many cases, enabling CUDA support might require you to compile OpenCV directly from source, which can be a daunting task especially for those with no prior experience. I have included my own OpenCV compile script [here](https://github.com/FlyingFathead/dvr-yolov8-detection/blob/main/utils/install_and_compile_opencv_with_cuda.sh), however I **do not recommend you run it** without understanding what it does. I have only used it to compile OpenCV with CUDA on a single Ubuntu Linux setup during summer 2024, so it's _not_ intended for everyone, and might already be outdated as you read this. Take what you will out of it at your own peril -- you have been warned.
+- Make sure that you have all the necessary modules installed with CUDA enabled. In many cases, enabling CUDA support might require you to compile OpenCV directly from source, which can be a daunting task especially for those with no prior experience. 
+
+- I have included my own OpenCV compile script [here](https://github.com/FlyingFathead/dvr-yolov8-detection/blob/main/utils/install_and_compile_opencv_with_cuda.sh), however I **do not recommend you run it** without understanding what it does. I have only used it to compile OpenCV with CUDA on a very platform and GPU-specific Ubuntu Linux environment (compiled during the summer of 2024), so it's _intended as a cheat sheet only, not as an install script_, as it might already be outdated as you read this, due to OpenCV's repositories being constantly updated. _Take what you want out of the compile script and and use it at your OWN RISK -- you have been warned._
 
 - There are multiple other guides online for compiling OpenCV with CUDA support, each with varying degrees of success.
 
