@@ -2,7 +2,7 @@
 
 ## Description
 
-The dvr-yolo8-detection project is designed for real-time detection of humans, animals, or objects using the YOLOv8 model and OpenCV. The project supports real-time video streams via RTMP or USB webcams, includes CUDA GPU acceleration for enhanced performance, and provides options for saving detections and logging events.
+The `dvr-yolo8-detection` computer vision project is designed for real-time detection of humans, animals, or objects using the YOLOv8 model and OpenCV. The project supports real-time video streams via RTMP or USB webcams, includes CUDA GPU acceleration for enhanced performance, and provides options for saving detections and logging events.
 
 ## Features
 
