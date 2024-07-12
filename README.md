@@ -179,7 +179,11 @@ You can use i.e. the `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch d
 - Good luck! _(you'll need it, as well as patience)_
 
 ### What if I don't have a CUDA-capable GPU?
-- You can still run the program in CPU-only mode, although it will be _extremely_ sluggish (don't expect too many frames per second). Should the model be too heavy to run on your computer, you can try changing it to a smaller one in the `config.ini` or even trying some of the rescale and frame rate options, although they are not always optimal either, as rescaling adds an extra step -- if possible, reduce the resolution and frame rate from your device's end, or, if you're using OBS Studio, from its output settings.
+- You can still run the program in CPU-only mode, although it will be _extremely_ sluggish in comparison to CUDA GPU acceleration -- whereas with CUDA-acceleration enabled it can run on a high FPS with large video streams (i.e. multiplexed A/V streams), in CPU-only mode, even on higher end CPU's, you might not get too many frames per second. 
+
+Should the model be too heavy to run on your computer in CPU-only mode, you can try changing the model size to a smaller one in the `config.ini`, or, as an alternative: try adjusting some of the rescale and frame rate options.
+
+It should be noted that rescaling adds an extra step to the input video processing: hence, if possible, the optimal approach would be to reduce the resolution and frame rate from your device's end (i.e. if you're using OBS Studio's Virtual Camera, adjust OBS's stream output settings) and/or changing the model size to a smaller one.
 
 ## TODO
 
