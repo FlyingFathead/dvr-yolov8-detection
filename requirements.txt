@@ -3,6 +3,5 @@ ultralytics>=8.0.3
 opencv-python-headless>=4.5.5.64
 numpy>=1.22.0
 pyttsx3>=2.90
-configparser>=5.0.2
 pytz>=2022.1
 ffmpeg-python>=0.2.0

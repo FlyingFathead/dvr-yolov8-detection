@@ -1,23 +1,29 @@
 # dvr-yolo8-detection
 
+## Description
+
+The dvr-yolo8-detection project is designed for real-time detection of humans, animals, or objects using the YOLOv8 model and OpenCV. The project supports real-time video streams via RTMP or USB webcams, includes CUDA GPU acceleration for enhanced performance, and provides options for saving detections and logging events.
+
+## Features
+
 - Real-time human / animal / object detection and alert system
 - Runs on Python + YOLOv8 + OpenCV2
 - Supports RTMP streams for real-time video sources
    - (a loopback example + nginx config example included)
 - Supports USB webcams for real-time video sources
-- Supports CUDA GPU acceleration
+- Supports CUDA GPU acceleration, runs in CPU-only mode as well
 - Detections can be automatically saved to images with a detection log
 - Separate tool included for offline video file detections
 
 ## Overview
 
-This project leverages YOLOv8 and OpenCV2 to perform object detection on either real-time video streams or batches of video files. It processes each video frame by frame, detects humans (by default; other specified and YOLOv8 supported types/objects can be added in as needed). The program can log the detections into a separate log file and additionally, save the detection frames with detected objects/entities highlighted and can send out an audio alert on detections via `pyttsx3`.
+This project uses Python with YOLOv8 and OpenCV2 to perform object detection on either real-time video streams or batches of video files. It processes each video frame by frame, detects humans (by default; other specified and YOLOv8 supported types/objects can be added in as needed). The program can log the detections into a separate log file and additionally, save the detection frames with detected objects/entities highlighted and can send out an audio alert on detections via `pyttsx3`.
 
-Please see the `config.ini` for configuration options.
+See the `config.ini` for configuration options.
 
 Using CUDA-enabled OpenCV is recommended for faster operation. **Note: CUDA-enabled OpenCV2 needs to be compiled manually and installed separately and the compiling process is highly dependent on your hardware setup. You can look up the "Troubleshooting" portion of this page for some generic advice and an example build script for OpenCV with CUDA.**
 
-The real-time detection also supports additional CUDA features such as CUDA video denoising (note: requires CUDA compiled from source).
+Real-time detection also supports additional CUDA features such as CUDA video denoising (note: this feature requires CUDA, and is often available only when compiled from source).
 
 - Configurable features options via `config.ini` are i.e.:
    - Your USB webcam or RTMP video source
@@ -31,13 +37,18 @@ The real-time detection also supports additional CUDA features such as CUDA vide
 
 ## Requirements
 
-- Python 3.6+
-- torch
-- ultralytics (YOLO)
-- OpenCV (CUDA-enabled recommended for faster processing)
-- numpy
-- pyttsx3 (for text-to-speech alerts)
-- ffmpeg (for handling RTMP streams)
+- Python 3.6+ with the following modules:
+   - torch
+   - ultralytics (YOLO)
+   - OpenCV (CUDA-enabled recommended for faster processing)
+      - (`opencv-python` if CUDA is not available)
+   - numpy
+   - pyttsx3 (for text-to-speech alerts)
+   - ffmpeg (for handling RTMP streams)
+   - pytz
+   - ffmpeg-python (for additional processing and loopbacks)
+
+See `requirements.txt` for needed Python modules.
 
 ## Installation
 
