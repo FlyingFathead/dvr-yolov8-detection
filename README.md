@@ -74,6 +74,9 @@ This approach ensures that the dependencies are managed through the `requirement
    ```
 
 3. Install OpenCV:
+
+   **(Note: the pre-packaged `pip` modules are without CUDA support by default)**
+
    - For a full version (with GUI support, **recommended**):
      ```bash
      pip install opencv-python
@@ -82,7 +85,8 @@ This approach ensures that the dependencies are managed through the `requirement
      ```bash
      pip install opencv-python-headless
      ```
-   - **For CUDA-enabled OpenCV**, you need to build it from source. Follow the instructions on the [OpenCV documentation](https://docs.opencv.org/master/d6/d15/tutorial_building_tegra_cuda.html).
+
+   - **For CUDA-enabled OpenCV**, you need to build it from source. Follow the instructions on the [OpenCV documentation](https://docs.opencv.org/master/d6/d15/tutorial_building_tegra_cuda.html) or take a peek at my build script [here](https://github.com/FlyingFathead/dvr-yolov8-detection/blob/main/utils/install_and_compile_opencv_with_cuda.sh) for potential tips on how to compile OpenCV with CUDA on Linux.
 
 4. Install FFmpeg:
    - On Ubuntu:
