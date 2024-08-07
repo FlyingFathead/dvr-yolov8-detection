@@ -6,7 +6,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.1501
+version_number = 0.151
 
 import cv2
 import torch
@@ -153,35 +153,68 @@ def log_cuda_info():
     logging.info(f"Using CUDA Device {current_device}: {current_gpu_name}")
 
 # Function to get the save directory
-def get_save_dir():
+def get_save_dir(args_save_dir=None):
+    def is_writable(directory):
+        return os.access(directory, os.W_OK)
+    
+    # Check if args.save_dir is provided and writable
+    if args_save_dir:
+        if os.path.exists(args_save_dir) and is_writable(args_save_dir):
+            logging.info(f"Using specified save directory: {args_save_dir}")
+            return args_save_dir
+        else:
+            logging.warning(f"Specified save directory {args_save_dir} does not exist or is not writable. Checked path: {args_save_dir}")
+    
+    # Check if environment variable specified directory
     if USE_ENV_SAVE_DIR:
         env_dir = os.getenv(ENV_SAVE_DIR_VAR)
         if env_dir:
-            if os.path.exists(env_dir):
+            if os.path.exists(env_dir) and is_writable(env_dir):
                 logging.info(f"Using environment-specified save directory: {env_dir}")
                 return env_dir
             else:
-                logging.warning(f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist. Using default save directory: {DEFAULT_SAVE_DIR}")
+                logging.warning(f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}")
         else:
-            logging.warning(f"Environment variable {ENV_SAVE_DIR_VAR} not set. Using default save directory: {DEFAULT_SAVE_DIR}")
+            logging.warning(f"Environment variable {ENV_SAVE_DIR_VAR} not set.")
+    
+    # Check default save directory
+    if os.path.exists(DEFAULT_SAVE_DIR):
+        if is_writable(DEFAULT_SAVE_DIR):
+            logging.info(f"Using default save directory: {DEFAULT_SAVE_DIR}")
+            return DEFAULT_SAVE_DIR
+        else:
+            logging.warning(f"Default save directory {DEFAULT_SAVE_DIR} is not writable. Checked path: {DEFAULT_SAVE_DIR}")
     else:
-        logging.info(f"Using default save directory: {DEFAULT_SAVE_DIR}")
-    return DEFAULT_SAVE_DIR
+        try:
+            os.makedirs(DEFAULT_SAVE_DIR)
+            if is_writable(DEFAULT_SAVE_DIR):
+                logging.info(f"Created and using default save directory: {DEFAULT_SAVE_DIR}")
+                return DEFAULT_SAVE_DIR
+        except Exception as e:
+            logging.error(f"Failed to create default save directory: {DEFAULT_SAVE_DIR}. Error: {e}")
 
-# Initialize the save directory
+    # Fallback to subdirectory in program directory
+    fallback_dir = os.path.join(os.path.dirname(__file__), 'fallback_detections')
+    if not os.path.exists(fallback_dir):
+        try:
+            os.makedirs(fallback_dir)
+            if is_writable(fallback_dir):
+                logging.info(f"Created and using fallback save directory: {fallback_dir}")
+                return fallback_dir
+        except Exception as e:
+            logging.error(f"Failed to create fallback save directory: {fallback_dir}. Error: {e}")
+    else:
+        if is_writable(fallback_dir):
+            logging.info(f"Using existing fallback save directory: {fallback_dir}")
+            return fallback_dir
+        else:
+            logging.warning(f"Fallback save directory {fallback_dir} is not writable. Checked path: {fallback_dir}")
+
+    # If everything fails, raise an error
+    raise RuntimeError("No writable save directory available.")
+
+# Initialize SAVE_DIR properly
 SAVE_DIR = get_save_dir()
-
-# Ensure the save directory exists and is writable
-if not os.path.exists(SAVE_DIR):
-    try:
-        os.makedirs(SAVE_DIR)
-        logging.info(f"Created save directory: {SAVE_DIR}")
-    except Exception as e:
-        logging.error(f"Failed to create save directory: {SAVE_DIR}. Error: {e}")
-        raise RuntimeError(f"Failed to create save directory: {SAVE_DIR}") from e
-elif not os.access(SAVE_DIR, os.W_OK):
-    logging.error(f"Save directory {SAVE_DIR} is not writable. Exiting.")
-    raise RuntimeError(f"Save directory {SAVE_DIR} is not writable.")
 
 # Function to log detection details
 def log_detection_details(detections, frame_count, timestamp):
@@ -417,7 +450,7 @@ if __name__ == "__main__":
     DRAW_RECTANGLES = args.draw_rectangles
     SAVE_DETECTIONS = args.save_detections
     IMAGE_FORMAT = args.image_format
-    SAVE_DIR = args.save_dir
+    SAVE_DIR = get_save_dir(args.save_dir)
     RETRY_DELAY = args.retry_delay
     MAX_RETRIES = args.max_retries
     RESCALE_INPUT = args.rescale_input

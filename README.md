@@ -213,6 +213,7 @@ It should be noted that rescaling adds an extra step to the input video processi
 
 ## Changes
 
+- v0.151 - fallbacks for directories
 - v0.1501 - fallback to non-CUDA modes if CUDA not supported
 - v0.15 - direct USB webcam support added!
    - you can edit the `config.ini` and set the input to webcam
