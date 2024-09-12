@@ -33,6 +33,8 @@ mkdir -p opencv/build && cd opencv/build
 
 # Run CMake configuration
 cmake -D CMAKE_BUILD_TYPE=Release \
+      -D CMAKE_C_COMPILER=/usr/bin/gcc-12 \
+      -D CMAKE_CXX_COMPILER=/usr/bin/g++-12 \
       -D CMAKE_INSTALL_PREFIX=/usr/local \
       -D OPENCV_EXTRA_MODULES_PATH=../../opencv_contrib/modules \
       -D WITH_CUDA=ON \
@@ -50,8 +52,8 @@ cmake -D CMAKE_BUILD_TYPE=Release \
       -D LAPACK_INCLUDE_DIR="/usr/include;/usr/include/x86_64-linux-gnu" \
       -D CBLAS_INCLUDE_DIR="/usr/include/x86_64-linux-gnu/openblas-pthread" \
       -D BLAS_LIBRARIES="/usr/lib/x86_64-linux-gnu/libblas.so" \
-      -D NVCUVID_HEADER_DIR=$HOME/builds/opencv_build/SDK/Video_Codec_SDK_12.2.72/Interface \
-      -D NVENCODEAPI_HEADER_DIR=$HOME/builds/opencv_build/SDK/Video_Codec_SDK_12.2.72/Interface \
+      -D NVCUVID_HEADER_DIR=$HOME/builds/Video_Codec_SDK_12.2.72/Interface \
+      -D NVENCODEAPI_HEADER_DIR=$HOME/builds/Video_Codec_SDK_12.2.72/Interface \
       -D CMAKE_VERBOSE_MAKEFILE=ON \
       ..
 
