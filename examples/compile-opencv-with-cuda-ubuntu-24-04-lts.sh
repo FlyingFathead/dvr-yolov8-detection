@@ -8,8 +8,7 @@ exit 0
 
 # after getting the SDK package:
 unzip ~/Downloads/Video_Codec_SDK_12.2.72.zip -d ~/builds/
-sudo cp ~/builds/Video_Codec_SDK_12.2.72/Interface/cuviddec.h /usr/include/
-sudo cp ~/builds/Video_Codec_SDK_12.2.72/Interface/nvEncodeAPI.h /usr/include/
+sudo cp ~/builds/Video_Codec_SDK_12.2.72/Interface/* /usr/include/
 
 # set to gcc 12
 export CC=/usr/bin/gcc-12
