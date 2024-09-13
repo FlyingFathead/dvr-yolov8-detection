@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 #
 # yolov8_live_rtmp_stream_detection.py
-# July 7 // 2024
+# Sept 14 // 2024
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.151
+version_number = 0.152
 
 import cv2
 import torch

@@ -9,11 +9,36 @@ echo "NOTE: You _WILL_ have to change the CUDA level according to your Nvidia GP
 exit 0
 
 # after getting the SDK package:
+mkdir -p ~/builds/
 unzip ~/Downloads/Video_Codec_SDK_12.2.72.zip -d ~/builds/
 sudo cp ~/builds/Video_Codec_SDK_12.2.72/Interface/* /usr/include/
 
-# NOTE: More than likely requires a separately compiled ffmpeg with -fPIC
-# Find and compile it with i.e.:
+# # NOTE: More than likely requires a separately compiled ffmpeg with -fPIC
+# # Find and compile it with i.e.:
+# cd ~/builds/
+# git clone https://git.ffmpeg.org/ffmpeg.git ffmpeg
+# cd ffmpeg
+# ./configure --enable-pic --disable-shared --enable-static
+# make -j$(nproc)
+# make install
+
+# or, rather -- try installing Ubuntu's own:
+sudo apt install ffmpeg libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
+
+# # one way to avoid problems with ffmpeg's static libraries ...
+# sudo mv /usr/local/lib/libavcodec.a /usr/local/lib/libavcodec.a.bak
+# sudo mv /usr/local/lib/libavformat.a /usr/local/lib/libavformat.a.bak
+# sudo mv /usr/local/lib/libavutil.a /usr/local/lib/libavutil.a.bak
+# sudo mv /usr/local/lib/libswscale.a /usr/local/lib/libswscale.a.bak
+# sudo mv /usr/local/lib/libswresample.a /usr/local/lib/libswresample.a.bak
+
+# # another way around;
+# sudo mv /usr/local/lib/libavcodec.a.bak /usr/local/lib/libavcodec.a
+# sudo mv /usr/local/lib/libavformat.a.bak /usr/local/lib/libavformat.a
+# sudo mv /usr/local/lib/libavutil.a.bak /usr/local/lib/libavutil.a
+# sudo mv /usr/local/lib/libswscale.a.bak /usr/local/lib/libswscale.a
+# sudo mv /usr/local/lib/libswresample.a.bak /usr/local/lib/libswresample.a
+
 # ./configure \
 #     --enable-shared \
 #     --enable-pic \
@@ -88,8 +113,8 @@ CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 cmake \
   -D WITH_V4L=ON \
   -D WITH_QT=ON \
   -D WITH_GLEW=ON \
-  -D FFMPEG_INCLUDE_DIR=$HOME/builds/ffmpeg/include \
-  -D FFMPEG_LIBRARIES="$HOME/builds/ffmpeg/lib/libavcodec.a;$HOME/builds/ffmpeg/lib/libavformat.a;$HOME/builds/ffmpeg/lib/libavutil.a;$HOME/builds/ffmpeg/lib/libswscale.a;$HOME/builds/ffmpeg/lib/libswresample.a" \
+  -D FFMPEG_INCLUDE_DIR=/usr/include/ffmpeg \
+  -D FFMPEG_LIBRARIES="/usr/lib/x86_64-linux-gnu/libavcodec.so;/usr/lib/x86_64-linux-gnu/libavformat.so;/usr/lib/x86_64-linux-gnu/libavutil.so;/usr/lib/x86_64-linux-gnu/libswscale.so;/usr/lib/x86_64-linux-gnu/libswresample.so" \
   -D AVRESAMPLE_INCLUDE_DIR=/usr/include/x86_64-linux-gnu \
   -D AVRESAMPLE_LIBRARIES=/usr/lib/x86_64-linux-gnu/libswresample.so \
   -D GLEW_LIBRARY=/usr/lib/x86_64-linux-gnu/libGLEW.so \
@@ -140,5 +165,5 @@ CC=/usr/bin/gcc-11 CXX=/usr/bin/g++-11 cmake \
 make -j$(nproc)
 
 # Install OpenCV
-sudo make install
+sudo make install -j$(nproc)
 sudo ldconfig
