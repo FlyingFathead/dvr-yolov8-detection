@@ -261,12 +261,19 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 
 ## Licensing
 
-- Feel free to use it for non-profit purposes as you see fit, as long as you give credit where it's due.
-- **Commercial Use:** Contact the author at `flyingfathead <@> protonmail.com` or visit [FlyingFathead on GitHub](https://github.com/FlyingFathead) if you have any ideas on that.
+This project is licensed under the **GNU General Public License v3.0 (GPLv3)**.
+
+### Ethos and Intent
+
+I created this project to support non-profit and educational endeavors. While the GPLv3 license permits commercial use, I kindly ask that if you plan to use this project for commercial purposes, you consider reaching out to me. Your support and collaboration are greatly appreciated.
+
+### Contact
+
+For inquiries, suggestions, or collaborations, please contact me at `flyingfathead@protonmail.com` or visit [FlyingFathead on GitHub](https://github.com/FlyingFathead).
 
 ## Contributing
 
-Contributions are welcome! Feel free to open issues or submit pull requests on GitHub, or contact the author directly at `flyingfathead@protonmail.com`.
+Contributions are welcome! Feel free to open issues or submit pull requests on GitHub, or contact the author (me) directly at `flyingfathead@protonmail.com`.
 
 ## Credits
 
