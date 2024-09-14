@@ -6,7 +6,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.152
+version_number = 0.153
 
 import cv2
 import torch
@@ -54,6 +54,7 @@ IMAGE_FORMAT = config.get('detection', 'image_format')
 USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir')
 ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var')
 DEFAULT_SAVE_DIR = config.get('detection', 'default_save_dir')
+FALLBACK_SAVE_DIR = config.get('detection', 'fallback_save_dir')
 RETRY_DELAY = config.getint('detection', 'retry_delay')
 MAX_RETRIES = config.getint('detection', 'max_retries')
 RESCALE_INPUT = config.getboolean('detection', 'rescale_input')
@@ -68,6 +69,9 @@ ENABLE_DETECTION_LOGGING_TO_FILE = config.getboolean('logging', 'enable_detectio
 LOG_DIRECTORY = config.get('logging', 'log_directory')
 LOG_FILE = config.get('logging', 'log_file')
 DETECTION_LOG_FILE = config.get('logging', 'detection_log_file')
+
+# New configuration for creating date-based subdirectories
+CREATE_DATE_SUBDIRS = config.getboolean('detection', 'create_date_subdirs', fallback=False)
 
 # Define the main logger
 main_logger = logging.getLogger('main')
@@ -152,69 +156,119 @@ def log_cuda_info():
     current_gpu_name = torch.cuda.get_device_name(current_device)
     logging.info(f"Using CUDA Device {current_device}: {current_gpu_name}")
 
-# Function to get the save directory
-def get_save_dir(args_save_dir=None):
-    def is_writable(directory):
-        return os.access(directory, os.W_OK)
-    
-    # Check if args.save_dir is provided and writable
-    if args_save_dir:
-        if os.path.exists(args_save_dir) and is_writable(args_save_dir):
-            logging.info(f"Using specified save directory: {args_save_dir}")
-            return args_save_dir
-        else:
-            logging.warning(f"Specified save directory {args_save_dir} does not exist or is not writable. Checked path: {args_save_dir}")
-    
-    # Check if environment variable specified directory
+# Function to get the base save directory (without date subdirs)
+def get_base_save_dir():
+    base_save_dir = None
+
+    # 1. Use environment-specified directory
     if USE_ENV_SAVE_DIR:
         env_dir = os.getenv(ENV_SAVE_DIR_VAR)
-        if env_dir:
-            if os.path.exists(env_dir) and is_writable(env_dir):
-                logging.info(f"Using environment-specified save directory: {env_dir}")
-                return env_dir
-            else:
-                logging.warning(f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}")
+        if env_dir and os.path.exists(env_dir) and os.access(env_dir, os.W_OK):
+            main_logger.info(f"Using environment-specified save directory: {env_dir}")
+            base_save_dir = env_dir
         else:
-            logging.warning(f"Environment variable {ENV_SAVE_DIR_VAR} not set.")
-    
-    # Check default save directory
-    if os.path.exists(DEFAULT_SAVE_DIR):
-        if is_writable(DEFAULT_SAVE_DIR):
-            logging.info(f"Using default save directory: {DEFAULT_SAVE_DIR}")
-            return DEFAULT_SAVE_DIR
+            main_logger.warning(f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}")
+
+    # 2. Fallback to fallback_save_dir
+    if not base_save_dir and FALLBACK_SAVE_DIR:
+        if os.path.exists(FALLBACK_SAVE_DIR) and os.access(FALLBACK_SAVE_DIR, os.W_OK):
+            main_logger.info(f"Using fallback save directory: {FALLBACK_SAVE_DIR}")
+            base_save_dir = FALLBACK_SAVE_DIR
         else:
-            logging.warning(f"Default save directory {DEFAULT_SAVE_DIR} is not writable. Checked path: {DEFAULT_SAVE_DIR}")
+            main_logger.warning(f"Fallback save directory {FALLBACK_SAVE_DIR} does not exist or is not writable. Attempting to create it.")
+            try:
+                os.makedirs(FALLBACK_SAVE_DIR, exist_ok=True)
+                if os.access(FALLBACK_SAVE_DIR, os.W_OK):
+                    main_logger.info(f"Created and using fallback save directory: {FALLBACK_SAVE_DIR}")
+                    base_save_dir = FALLBACK_SAVE_DIR
+                else:
+                    main_logger.warning(f"Fallback save directory {FALLBACK_SAVE_DIR} is not writable after creation.")
+            except Exception as e:
+                main_logger.error(f"Failed to create fallback save directory: {FALLBACK_SAVE_DIR}. Error: {e}")
+
+    # 3. Use default_save_dir
+    if not base_save_dir and DEFAULT_SAVE_DIR:
+        if os.path.exists(DEFAULT_SAVE_DIR) and os.access(DEFAULT_SAVE_DIR, os.W_OK):
+            main_logger.info(f"Using default save directory: {DEFAULT_SAVE_DIR}")
+            base_save_dir = DEFAULT_SAVE_DIR
+        else:
+            main_logger.warning(f"Default save directory {DEFAULT_SAVE_DIR} does not exist or is not writable. Attempting to create it.")
+            try:
+                os.makedirs(DEFAULT_SAVE_DIR, exist_ok=True)
+                if os.access(DEFAULT_SAVE_DIR, os.W_OK):
+                    main_logger.info(f"Created and using default save directory: {DEFAULT_SAVE_DIR}")
+                    base_save_dir = DEFAULT_SAVE_DIR
+                else:
+                    main_logger.warning(f"Default save directory {DEFAULT_SAVE_DIR} is not writable after creation.")
+            except Exception as e:
+                main_logger.error(f"Failed to create default save directory: {DEFAULT_SAVE_DIR}. Error: {e}")
+
+    # 4. Final fallback to a hardcoded directory (optional)
+    if not base_save_dir:
+        final_fallback_dir = os.path.join(os.path.dirname(__file__), 'final_fallback_detections')
+        if os.path.exists(final_fallback_dir) and os.access(final_fallback_dir, os.W_OK):
+            main_logger.info(f"Using final hardcoded fallback save directory: {final_fallback_dir}")
+            base_save_dir = final_fallback_dir
+        else:
+            try:
+                os.makedirs(final_fallback_dir, exist_ok=True)
+                if os.access(final_fallback_dir, os.W_OK):
+                    main_logger.info(f"Created and using final hardcoded fallback save directory: {final_fallback_dir}")
+                    base_save_dir = final_fallback_dir
+                else:
+                    main_logger.warning(f"Final fallback save directory {final_fallback_dir} is not writable after creation.")
+            except Exception as e:
+                main_logger.error(f"Failed to create final hardcoded fallback save directory: {final_fallback_dir}. Error: {e}")
+
+    # Raise error if no writable directory is found
+    if not base_save_dir:
+        raise RuntimeError("No writable save directory available.")
+
+    return base_save_dir
+
+# Initialize SAVE_DIR and CURRENT_DATE
+SAVE_DIR_BASE = get_base_save_dir()
+CURRENT_DATE = datetime.now().date()
+
+# Function to get the current save directory with date-based subdirectories
+def get_current_save_dir():
+    global CURRENT_DATE, SAVE_DIR_BASE
+
+    if CREATE_DATE_SUBDIRS:
+        new_date = datetime.now().date()
+        if new_date != CURRENT_DATE:
+            CURRENT_DATE = new_date
+            # Update SAVE_DIR with new date-based subdirectories
+            year = CURRENT_DATE.strftime("%Y")
+            month = CURRENT_DATE.strftime("%m")
+            day = CURRENT_DATE.strftime("%d")
+            date_subdir = os.path.join(SAVE_DIR_BASE, year, month, day)
+            try:
+                os.makedirs(date_subdir, exist_ok=True)
+                main_logger.info(f"Date changed. Created/navigated to new date-based subdirectory: {date_subdir}")
+                return date_subdir
+            except Exception as e:
+                main_logger.error(f"Failed to create new date-based subdirectory {date_subdir}: {e}")
+                # Fallback to base_save_dir if subdirectory creation fails
+                return SAVE_DIR_BASE
+        else:
+            # Ensure the date-based subdirectory exists
+            year = CURRENT_DATE.strftime("%Y")
+            month = CURRENT_DATE.strftime("%m")
+            day = CURRENT_DATE.strftime("%d")
+            date_subdir = os.path.join(SAVE_DIR_BASE, year, month, day)
+            if not os.path.exists(date_subdir):
+                try:
+                    os.makedirs(date_subdir, exist_ok=True)
+                    main_logger.info(f"Created date-based subdirectory: {date_subdir}")
+                except Exception as e:
+                    main_logger.error(f"Failed to create date-based subdirectory {date_subdir}: {e}")
+            return date_subdir
     else:
-        try:
-            os.makedirs(DEFAULT_SAVE_DIR)
-            if is_writable(DEFAULT_SAVE_DIR):
-                logging.info(f"Created and using default save directory: {DEFAULT_SAVE_DIR}")
-                return DEFAULT_SAVE_DIR
-        except Exception as e:
-            logging.error(f"Failed to create default save directory: {DEFAULT_SAVE_DIR}. Error: {e}")
+        return SAVE_DIR_BASE
 
-    # Fallback to subdirectory in program directory
-    fallback_dir = os.path.join(os.path.dirname(__file__), 'fallback_detections')
-    if not os.path.exists(fallback_dir):
-        try:
-            os.makedirs(fallback_dir)
-            if is_writable(fallback_dir):
-                logging.info(f"Created and using fallback save directory: {fallback_dir}")
-                return fallback_dir
-        except Exception as e:
-            logging.error(f"Failed to create fallback save directory: {fallback_dir}. Error: {e}")
-    else:
-        if is_writable(fallback_dir):
-            logging.info(f"Using existing fallback save directory: {fallback_dir}")
-            return fallback_dir
-        else:
-            logging.warning(f"Fallback save directory {fallback_dir} is not writable. Checked path: {fallback_dir}")
-
-    # If everything fails, raise an error
-    raise RuntimeError("No writable save directory available.")
-
-# Initialize SAVE_DIR properly
-SAVE_DIR = get_save_dir()
+# Initialize the initial SAVE_DIR
+SAVE_DIR = get_current_save_dir()
 
 # Function to log detection details
 def log_detection_details(detections, frame_count, timestamp):
@@ -235,7 +289,6 @@ def resize_frame(frame, target_height):
 # Function to announce detection using a separate thread
 def announce_detection():
     global last_tts_time
-    current_time = time.time()
     while not tts_stop_event.is_set():
         current_time = time.time()
         if current_time - last_tts_time >= TTS_COOLDOWN:
@@ -245,24 +298,28 @@ def announce_detection():
             last_tts_time = current_time
         time.sleep(1)
 
-# Function to save detection image
+# Function to save detection image with date check
 def save_detection_image(frame, detection_count):
+    global SAVE_DIR
     try:
+        # Update SAVE_DIR based on current date
+        SAVE_DIR = get_current_save_dir()
+        
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")  # Format timestamp as YYYYMMDD-HHMMSS
-        filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}.{IMAGE_FORMAT}")  # Modified format
+        filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}.{IMAGE_FORMAT}")  # Ensure SAVE_DIR already includes date subdirs
         cv2.imwrite(filename, frame)
-        logging.info(f"Saved detection image: {filename}")
+        main_logger.info(f"Saved detection image: {filename}")
     except Exception as e:
-        logging.error(f"Error saving detection image: {e}")
+        main_logger.error(f"Error saving detection image: {e}")
 
 # Check if the CUDA denoising function is available
 def cuda_denoising_available():
     try:
         _ = cv2.cuda.createFastNlMeansDenoisingColored
-        logging.info("CUDA denoising is available.")
+        main_logger.info("CUDA denoising is available.")
         return True
     except AttributeError:
-        logging.warning("CUDA denoising is not available.")
+        main_logger.warning("CUDA denoising is not available.")
         return False
 
 # Frame capture thread
@@ -271,11 +328,11 @@ def frame_capture_thread(stream_url, use_webcam, webcam_index, frame_queue, stop
     cap = None
 
     if use_webcam:
-        logging.info(f"Using webcam with index {webcam_index}")
+        main_logger.info(f"Using webcam with index {webcam_index}")
         cap = cv2.VideoCapture(webcam_index)
     else:
         while retries < MAX_RETRIES:
-            logging.info(f"Attempting to open video stream: {stream_url}")
+            main_logger.info(f"Attempting to open video stream: {stream_url}")
 
             # Set FFmpeg options
             ffmpeg_options = {
@@ -291,28 +348,27 @@ def frame_capture_thread(stream_url, use_webcam, webcam_index, frame_queue, stop
             cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, TIMEOUT * 1000)
 
             if cap.isOpened():
-                logging.info("Successfully opened video stream.")
+                main_logger.info("Successfully opened video stream.")
                 break
             else:
-                logging.error(f"Unable to open video stream: {stream_url}. Retrying in {RETRY_DELAY} seconds...")
+                main_logger.error(f"Unable to open video stream: {stream_url}. Retrying in {RETRY_DELAY} seconds...")
                 time.sleep(RETRY_DELAY)
                 retries += 1
 
     if cap is None or not cap.isOpened():
-        logging.error(f"Failed to open video source after {MAX_RETRIES} retries.")
+        main_logger.error(f"Failed to open video source after {MAX_RETRIES} retries.")
         return
 
     while not stop_event.is_set():
         ret, frame = cap.read()
         if not ret:
-            logging.warning("Failed to read frame from source.")
+            main_logger.warning("Failed to read frame from source.")
             time.sleep(1)
             continue
         frame_queue.put(frame)
 
     cap.release()
-    logging.info("Video source closed.")
-
+    main_logger.info("Video source closed.")
 
 # Frame processing thread
 def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectangles, denoise, process_fps, use_process_fps, detection_ongoing):
@@ -342,11 +398,12 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     if use_cuda_denoising:
                         gpu_frame = cv2.cuda_GpuMat()
                         gpu_frame.upload(resized_frame)
-                        denoised_frame = cv2.cuda.createFastNlMeansDenoisingColored(gpu_frame, None, 3, 3, 7).download()
+                        denoised_gpu = cv2.cuda.createFastNlMeansDenoisingColored(gpu_frame, None, 3, 3, 7)
+                        denoised_frame = denoised_gpu.download()
                     else:
                         denoised_frame = cv2.fastNlMeansDenoisingColored(resized_frame, None, 3, 3, 7, 21)
                 except cv2.error as e:
-                    logging.error(f"Error applying denoising: {e}")
+                    main_logger.error(f"Error applying denoising: {e}")
                     denoised_frame = resized_frame
             else:
                 denoised_frame = resized_frame
@@ -359,7 +416,7 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     detecting_human = True
                     detection_ongoing.set()
                     detection_count += 1
-                    logging.info(f"Detections found: {detections}")
+                    main_logger.info(f"Detections found: {detections}")
                 for detection in detections:
                     x1, y1, x2, y2, confidence, class_idx = detection
                     if draw_rectangles:
@@ -367,12 +424,9 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                         cv2.rectangle(denoised_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                         label = f'Person: {confidence:.2f}'
                         cv2.putText(denoised_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                        logging.info(f"Rectangle drawn: {x1, y1, x2, y2} with confidence {confidence:.2f}")
+                        main_logger.info(f"Rectangle drawn: {x1, y1, x2, y2} with confidence {confidence:.2f}")
                 if SAVE_DETECTIONS:
                     save_detection_image(denoised_frame, detection_count)
-
-                # Calculate the current timestamp
-                # timestamp = datetime.now(pytz.timezone('Europe/Helsinki')).strftime('%Y-%m-%d %H:%M:%S %Z%z')
 
                 # Calculate the current timestamp using the local system's timezone
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z%z')
@@ -401,7 +455,7 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
             total_frames += 1
             if time.time() - last_log_time >= 1:
                 fps = total_frames / (time.time() - last_log_time)
-                logging.info(f'Processed {total_frames} frames at {fps:.2f} FPS')
+                main_logger.info(f'Processed {total_frames} frames at {fps:.2f} FPS')
                 last_log_time = time.time()
                 total_frames = 0
 
@@ -417,7 +471,7 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
 
 # When the user wants to exit
 def signal_handler(sig, frame):
-    logging.info("Interrupt received, stopping, please wait for the program to finish...")
+    main_logger.info("Interrupt received, stopping, please wait for the program to finish...")
     stop_event.set()
 
 # Main
@@ -426,13 +480,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="YOLOv8 RTMP Stream Human Detection")
     parser.add_argument("--stream_url", type=str, default=STREAM_URL, help="URL of the RTMP stream")
     parser.add_argument("--use_webcam", type=bool, default=USE_WEBCAM, help="Use webcam for video input")
-    parser.add_argument("--webcam_index", type=int, default=0, help="Index number of the webcam to use")
+    parser.add_argument("--webcam_index", type=int, default=WEBCAM_INDEX, help="Index number of the webcam to use")
     parser.add_argument("--conf_threshold", type=float, default=DEFAULT_CONF_THRESHOLD, help="Confidence threshold for detections")
     parser.add_argument("--model_variant", type=str, default=DEFAULT_MODEL_VARIANT, help="YOLOv8 model variant to use")
     parser.add_argument("--draw_rectangles", type=bool, default=DRAW_RECTANGLES, help="Draw rectangles around detected objects")
     parser.add_argument("--save_detections", type=bool, default=SAVE_DETECTIONS, help="Save images with detections")
     parser.add_argument("--image_format", type=str, default=IMAGE_FORMAT, help="Image format for saving detections (jpg or png)")
-    parser.add_argument("--save_dir", type=str, default=SAVE_DIR, help="Directory to save detection images")
+    parser.add_argument("--save_dir", type=str, default=None, help="Directory to save detection images")  # Changed default to None
+    # Removed fallback_save_dir from arguments as it's handled via config.ini
     parser.add_argument("--retry_delay", type=int, default=RETRY_DELAY, help="Delay between retries to connect to the stream")
     parser.add_argument("--max_retries", type=int, default=MAX_RETRIES, help="Maximum number of retries to connect to the stream")
     parser.add_argument("--rescale_input", type=bool, default=RESCALE_INPUT, help="Rescale the input frames")
@@ -443,14 +498,22 @@ if __name__ == "__main__":
     parser.add_argument("--timeout", type=int, default=TIMEOUT, help="Timeout for the video stream in seconds")
 
     args = parser.parse_args()
-    
+
+    # Initialize SAVE_DIR using the updated get_save_dir function
+    try:
+        SAVE_DIR = get_current_save_dir()
+        main_logger.info(f"Saving detections to directory: {SAVE_DIR}")
+    except RuntimeError as e:
+        main_logger.error(f"Error initializing save directory: {e}")
+        sys.exit(1)
+
+    # Update other configurations based on arguments
     STREAM_URL = args.stream_url
     USE_WEBCAM = args.use_webcam
     WEBCAM_INDEX = args.webcam_index    
     DRAW_RECTANGLES = args.draw_rectangles
     SAVE_DETECTIONS = args.save_detections
     IMAGE_FORMAT = args.image_format
-    SAVE_DIR = get_save_dir(args.save_dir)
     RETRY_DELAY = args.retry_delay
     MAX_RETRIES = args.max_retries
     RESCALE_INPUT = args.rescale_input
@@ -463,8 +526,6 @@ if __name__ == "__main__":
     frame_queue = Queue(maxsize=10)
     stop_event = Event()
     detection_ongoing = Event()
-
-    logging.info(f"Saving detections to directory: {SAVE_DIR}")
 
     # Register signal handler for clean exit
     signal.signal(signal.SIGINT, signal_handler)
@@ -482,6 +543,10 @@ if __name__ == "__main__":
         processing_thread.join()
     
     finally:
-        logging.info("Cleaning up threads and resources.")
+        # Ensure TTS thread is stopped
+        tts_stop_event.set()
+        if tts_thread is not None:
+            tts_thread.join()
+        main_logger.info("Cleaning up threads and resources.")
         cv2.destroyAllWindows()
-        logging.info("Program exited cleanly.")
+        main_logger.info("Program exited cleanly.")

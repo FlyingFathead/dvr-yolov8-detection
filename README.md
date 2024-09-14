@@ -242,6 +242,10 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 
 ## Changelog
 
+- **v0.153**
+  - `config.ini` & program changes:
+  - Fallback directory (`fallback_save_dir`)
+  - Option to create date-based sub-directories (i.e. `/detections_path/year/month/day/`)
 - **v0.152**
   - Added Conda/Mamba installer script for easier deployment
 - **v0.151**
