@@ -221,7 +221,7 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 
 - Ensure that you have all necessary modules installed with CUDA enabled.
 - You may need to compile OpenCV from source to enable CUDA support.
-- Refer to the [build script](utils/install_and_compile_opencv_with_cuda.sh) for guidance.
+- Refer i.e. to the [OpenCV w/ CUDA build script for Ubuntu 22.04LTS](examples/install_and_compile_opencv_with_cuda.sh) or [the 24.04LTS build script](examples/compile-opencv-with-cuda-ubuntu-24-04-lts.sh) for some degree of guidance.
 - Verify CUDA support by checking if the program detects your GPU on startup.
 
 ### Running Without a CUDA-Capable GPU
