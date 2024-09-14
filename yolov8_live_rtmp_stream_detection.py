@@ -472,8 +472,10 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
 # When the user wants to exit
 def signal_handler(sig, frame):
     main_logger.info("Interrupt received, stopping, please wait for the program to finish...")
-    stop_event.set()
-
+    stop_event.set()  # Signal threads to stop
+    cv2.destroyAllWindows()
+    sys.exit(0)
+    
 # Main
 if __name__ == "__main__":
     log_cuda_info()  # Add this line
