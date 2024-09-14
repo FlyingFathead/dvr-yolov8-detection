@@ -18,12 +18,6 @@ check_conda() {
     fi
 }
 
-# Function to activate Conda environment
-activate_conda_env() {
-    source "$(conda info --base)/etc/profile.d/conda.sh"
-    conda activate "$CONDA_ENV_NAME"
-}
-
 # Function to check if a virtual environment is active
 check_venv() {
     if [ -z "$VIRTUAL_ENV" ]; then
@@ -32,6 +26,16 @@ check_venv() {
         return 0  # Virtual environment is active
     fi
 }
+
+# Initialize Conda
+if check_conda; then
+    echo "Initializing Conda..."
+    # Initialize Conda for use in the script
+    source "$(conda info --base)/etc/profile.d/conda.sh"
+else
+    echo "Conda not found. Exiting."
+    exit 1
+fi
 
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
@@ -48,34 +52,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Activate the environment based on ENV_TYPE
-case $ENV_TYPE in
-    conda)
-    if check_conda; then
-        echo "Activating Conda environment '$CONDA_ENV_NAME'."
-        activate_conda_env
-    else
-        echo "Conda not found. Exiting."
-        exit 1
-    fi
-    ;;
-    virtualenv)
-    if check_venv; then
-        echo "Using the active virtual environment at '$VIRTUAL_ENV'."
-    else
-        echo "No virtual environment is active. Exiting."
-        exit 1
-    fi
-    ;;
-    none)
-    echo "Proceeding without activating any environment."
-    ;;
-    *)
-    echo "Unknown environment type '$ENV_TYPE'. Exiting."
-    exit 1
-    ;;
-esac
-
 # Function to handle script termination
 terminate_script() {
     echo "Termination signal received. Exiting..."
@@ -89,10 +65,44 @@ trap terminate_script SIGINT SIGTERM
 run_script() {
     while true; do
         echo "Starting YOLOv8 RTMP Stream Detection script..."
-        python "$SCRIPT_PATH"
 
-        # Check the exit code
-        EXIT_CODE=$?
+        case $ENV_TYPE in
+            conda)
+                if check_conda; then
+                    echo "Activating Conda environment '$CONDA_ENV_NAME'."
+                    conda activate "$CONDA_ENV_NAME"
+                    # Run the script
+                    python "$SCRIPT_PATH"
+                    # Capture the exit code
+                    EXIT_CODE=$?
+                    # Deactivate the environment after the script finishes
+                    conda deactivate
+                else
+                    echo "Conda not found. Exiting."
+                    exit 1
+                fi
+                ;;
+            virtualenv)
+                if check_venv; then
+                    echo "Using the active virtual environment at '$VIRTUAL_ENV'."
+                    python "$SCRIPT_PATH"
+                    EXIT_CODE=$?
+                else
+                    echo "No virtual environment is active. Exiting."
+                    exit 1
+                fi
+                ;;
+            none)
+                echo "Proceeding without activating any environment."
+                python "$SCRIPT_PATH"
+                EXIT_CODE=$?
+                ;;
+            *)
+                echo "Unknown environment type '$ENV_TYPE'. Exiting."
+                exit 1
+                ;;
+        esac
+
         if [ $EXIT_CODE -eq 0 ]; then
             echo "Script exited normally."
             # Break the loop if you don't want to restart on normal exit
