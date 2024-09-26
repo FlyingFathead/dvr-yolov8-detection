@@ -217,12 +217,21 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 
 ## Troubleshooting
 
+### RTMP Loopback Issues
+
+- If for whatever reason the loopback doesn't seem working, you can create a test stream with i.e. `utils/test_stream_generator.py`. When ran, the script generates synthetic video frames and streams them to your RTMP server using FFmpeg as a subprocess, enabling you to try out if your loopback works. 
+- Run the `test_stream_generator.py` and keep it running in the background, then try to first use VLC to connect to your stream (`VLC: Media -> Open Network Stream -> rtmp://127.0.0.1:1935/live/stream`). If this works, the main detection script should work as well.
+
 ### CUDA Not Found
 
 - Ensure that you have all necessary modules installed with CUDA enabled.
 - You may need to compile OpenCV from source to enable CUDA support.
 - Refer i.e. to the [OpenCV w/ CUDA build script for Ubuntu 22.04LTS](examples/install_and_compile_opencv_with_cuda.sh) or [the 24.04LTS build script](examples/compile-opencv-with-cuda-ubuntu-24-04-lts.sh) for some degree of guidance.
 - Verify CUDA support by checking if the program detects your GPU on startup.
+
+### CUDA Installation
+
+- See: [CUDA Setup Guide](CUDA_SETUP.md)
 
 ### Running Without a CUDA-Capable GPU
 
