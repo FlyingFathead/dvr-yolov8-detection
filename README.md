@@ -57,9 +57,10 @@ Before proceeding, ensure the following are installed and configured on your sys
    - **Installation Steps:**
      ```bash
      # Add the package repositories
-     distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-     curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-     curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
+      && curl -s -L https://nvidia.github.io/libnvidia-container/stable/$distribution/nvidia-container-toolkit.list | \
+      sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
      
      # Install the NVIDIA Container Toolkit
      sudo apt-get update
