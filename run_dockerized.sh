@@ -36,20 +36,19 @@ function check_docker_service {
 
 # Function to check if user has access to Docker commands
 function check_docker_access {
-    # Test Docker access
-    if docker info &> /dev/null; then
+    # Test Docker access and capture output
+    DOCKER_INFO_OUTPUT=$(docker info 2>&1)
+
+    # Check if "permission denied" is in the output
+    if echo "$DOCKER_INFO_OUTPUT" | grep -q "permission denied"; then
+        echo_error "Current user does not have permissions to access Docker. Please re-run this script with sudo: sudo ./run_dockerized.sh"
+        exit 1
+    elif echo "$DOCKER_INFO_OUTPUT" | grep -q "Server:"; then
         echo_success "Docker commands can be run without sudo."
         USE_SUDO=false
     else
-        echo_error "Current user cannot access Docker commands without sudo."
-        # Test with sudo
-        if sudo docker info &> /dev/null; then
-            echo_success "Docker commands can be run with sudo."
-            USE_SUDO=true
-        else
-            echo_error "Cannot access Docker even with sudo. Exiting."
-            exit 1
-        fi
+        echo_error "An unknown error occurred when trying to access Docker. Please check your Docker setup."
+        exit 1
     fi
 }
 
