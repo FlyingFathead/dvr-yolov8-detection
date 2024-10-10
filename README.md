@@ -35,6 +35,222 @@ Real-time detection also supports additional CUDA features such as CUDA video de
 - Model variant selection (e.g., YOLOv8n, YOLOv8s, YOLOv8m)
 - _... and other additional customizable options_
 
+---
+
+## 🐳 Dockerized Setup 🐳
+
+Setting up `dvr-yolov8-detection` using Docker streamlines the deployment process, ensuring a consistent environment across different systems. This section guides you through building and running the Docker container, leveraging GPU acceleration for optimal performance.
+
+### 🔧 **Prerequisites**
+
+Before proceeding, ensure the following are installed and configured on your system:
+
+1. **Docker Engine**
+   - **Installation Guide:** [Docker Installation](https://docs.docker.com/engine/install/)
+
+2. **NVIDIA Drivers**
+   - **Ensure** that your system has the latest NVIDIA drivers installed to support CUDA GPU acceleration.
+   - **Installation Guide:** [NVIDIA Driver Downloads](https://www.nvidia.com/Download/index.aspx)
+
+3. **NVIDIA Container Toolkit**
+   - Enables Docker to access the GPU resources on the host machine.
+   - **Installation Steps:**
+     ```bash
+     # Add the package repositories
+     distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+     curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+     curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+     
+     # Install the NVIDIA Container Toolkit
+     sudo apt-get update
+     sudo apt-get install -y nvidia-docker2
+     
+     # Restart the Docker daemon to apply changes
+     sudo systemctl restart docker
+     ```
+   - **Reference:** [NVIDIA Docker Documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+
+4. **GitHub Repository Clone**
+   - Clone the `dvr-yolov8-detection` repository to your local machine:
+     ```bash
+     git clone https://github.com/FlyingFathead/dvr-yolov8-detection.git
+     cd dvr-yolov8-detection
+     ```
+
+### 🛠️ **Building the Docker Image**
+
+1. **Navigate to the Project Directory:**
+   Ensure you're in the root directory of the cloned repository where the `Dockerfile` is located.
+   ```bash
+   cd dvr-yolov8-detection
+   ```
+
+2. **Build the Docker Image:**
+   Execute the following command to build the Docker image named `yolov8_detection:latest`:
+   ```bash
+   docker build -t yolov8_detection:latest .
+   ```
+   - **Explanation:**
+     - `docker build`: Command to build a Docker image from a Dockerfile.
+     - `-t yolov8_detection:latest`: Tags the image with the name `yolov8_detection` and the tag `latest`.
+     - `.`: Specifies the current directory as the build context.
+
+   - **Note:** The build process may take some time, especially when compiling OpenCV with CUDA support.
+
+### 🚀 **Running the Docker Container**
+
+You have two options to run the Docker container: **Manually** or using the provided **`run_dockerized.sh` script**.
+
+#### **Option 1: Manual Execution**
+
+1. **Run the Container:**
+   ```bash
+   docker run --gpus all --network=host --rm yolov8_detection:latest
+   ```
+   - **Flags Explained:**
+     - `--gpus all`: Grants the container access to all available GPUs.
+     - `--network=host`: Shares the host's network stack with the container, allowing seamless access to services like RTMP servers running on `localhost`.
+     - `--rm`: Automatically removes the container once it stops, keeping your system clean.
+
+2. **Mount Configuration and Output Directories (Optional):**
+   To customize configurations or persist detection outputs outside the container, use volume mounts:
+   
+   ```bash
+   docker run --gpus all --network=host --rm \
+     -v ./config.ini:/app/config.ini \
+     -v ./yolo_detections:/app/yolo_detections \
+     -v ./logs:/app/logs \
+     yolov8_detection:latest
+   ```
+   - **Flags Explained:**
+     - `-v ./config.ini:/app/config.ini`: Mounts your custom `config.ini` into the container.
+     - `-v ./yolo_detections:/app/yolo_detections`: Persists detection images to the host.
+     - `-v ./logs:/app/logs`: Stores log files on the host for easy access.
+
+#### **Option 2: Using the `run_dockerized.sh` Script**
+
+The `run_dockerized.sh` script automates the process of checking prerequisites and running the Docker container with the appropriate configurations.
+
+1. **Ensure the Script is Executable:**
+   ```bash
+   chmod +x run_dockerized.sh
+   ```
+
+2. **Run the Script:**
+   ```bash
+   ./run_dockerized.sh
+   ```
+   - **Script Functionality:**
+     - **Docker Installation Check:** Verifies if Docker is installed.
+     - **Docker Service Status Check:** Ensures the Docker daemon is running.
+     - **User Permissions Check:** Determines if the current user is part of the `docker` group to run Docker commands without `sudo`.
+     - **Docker Image Availability Check:** Checks if the `yolov8_detection:latest` image exists locally; prompts to build it if not found.
+     - **Container Execution:** Runs the Docker container with GPU access and host networking.
+
+   - **Advantages:**
+     - **Automated Checks:** Reduces manual verification steps.
+     - **User-Friendly:** Provides clear messages and prompts for user actions.
+     - **Enhanced Security:** Handles permission nuances seamlessly.
+
+### ⚙️ **Configuration**
+
+`dvr-yolov8-detection` utilizes a `config.ini` file to manage various operational parameters. Here's how to integrate it with your Docker setup:
+
+1. **Locate or Create `config.ini`:**
+   - If you have a custom `config.ini`, ensure it's prepared with your desired settings.
+   - If not, refer to the default configuration provided in the repository and modify as needed.
+
+2. **Mount `config.ini` into the Container:**
+   ```bash
+   docker run --gpus all --network=host --rm \
+     -v ./config.ini:/app/config.ini \
+     yolov8_detection:latest
+   ```
+   - **Benefit:** Allows you to modify configurations without rebuilding the Docker image.
+
+3. **Persist Detection Outputs and Logs:**
+   To ensure that detection results and logs are stored outside the container for later review:
+   ```bash
+   docker run --gpus all --network=host --rm \
+     -v ./config.ini:/app/config.ini \
+     -v ./yolo_detections:/app/yolo_detections \
+     -v ./logs:/app/logs \
+     yolov8_detection:latest
+   ```
+   - **Explanation:**
+     - **Detections Volume (`/app/yolo_detections`):** Stores images with detected objects.
+     - **Logs Volume (`/app/logs`):** Contains log files detailing detection events and system messages.
+
+### 🗃️ **Data Persistence and Volume Management**
+
+To maintain data across container restarts or to access outputs directly on your host system, utilize Docker volumes effectively.
+
+1. **Create Host Directories:**
+   ```bash
+   mkdir -p ./yolo_detections
+   mkdir -p ./logs
+   ```
+   
+2. **Run the Container with Volume Mounts:**
+   ```bash
+   docker run --gpus all --network=host --rm \
+     -v ./config.ini:/app/config.ini \
+     -v ./yolo_detections:/app/yolo_detections \
+     -v ./logs:/app/logs \
+     yolov8_detection:latest
+   ```
+   - **Benefits:**
+     - **Persistent Storage:** Data remains intact even if the container is removed.
+     - **Easy Access:** Access detection images and logs directly from your host machine.
+
+### 🐞 **Troubleshooting Tips**
+
+- **No GPU Detected:**
+  - Ensure that NVIDIA drivers and the NVIDIA Container Toolkit are correctly installed.
+  - Verify Docker has access to the GPU by running:
+    ```bash
+    docker run --gpus all nvidia/cuda:12.4.0-base-ubuntu22.04 nvidia-smi
+    ```
+    - **Expected Output:** Displays your GPU details.
+
+- **RTMP Stream Issues:**
+  - Confirm that your RTMP server is running and accessible.
+  - Ensure the stream URL in `config.ini` matches your RTMP server settings.
+
+- **Webcam Access Problems:**
+  - Verify that the container has access to the webcam device.
+  - You might need to specify device permissions or use privileged mode (use cautiously):
+    ```bash
+    docker run --gpus all --network=host --rm \
+      --device=/dev/video0:/dev/video0 \
+      yolov8_detection:latest
+    ```
+
+- **Permission Denied Errors:**
+  - Ensure your user is part of the `docker` group.
+  - Re-run the `run_dockerized.sh` script or use `sudo` if necessary.
+
+- **Missing `requirements.txt`:**
+  - Ensure that `requirements.txt` is present in the build context when building the Docker image.
+  - Verify the `Dockerfile` has the correct `COPY` path for `requirements.txt`.
+
+### 📝 **Additional Notes**
+
+- **Host Networking Limitations:**
+  - The `--network=host` flag is **only supported on Linux**. If you're using Docker Desktop on Windows or macOS, consider alternative networking configurations, such as using `host.docker.internal` or Docker Compose with a shared network.
+
+- **Configuration Flexibility:**
+  - By mounting the `config.ini` file, you can easily switch between different configurations without modifying the Docker image.
+
+- **Automated Scripts:**
+  - Utilize the provided `run_dockerized.sh` script for streamlined execution and to handle common setup checks automatically.
+
+By following this Dockerized setup, you can efficiently deploy and manage the `dvr-yolov8-detection` application, leveraging the power of containerization and GPU acceleration for real-time detection tasks.
+
+---
+
+## Install Method B: Manual Setup
+
 ## Requirements
 
 - **Python 3.6+** (Python 3.10.x recommended)
@@ -48,11 +264,10 @@ Real-time detection also supports additional CUDA features such as CUDA video de
     - `pytz`
 
 - **FFmpeg** 
-
-## Recommended Setup
-
 - **Python 3.10.x**
-- Install **CUDA 11.8** or higher to enable GPU-accelerated processing
+- If you wish to use CUDA GPU acceleration, you will need:
+  - A Nvidia GPU that supports CUDA
+  - Install **CUDA 11.8** or higher to enable GPU-accelerated processing
 - Use **Miniconda** or **Mamba** for environment management
 
 ## Installation (Conda/Mamba Environments)
@@ -254,7 +469,7 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - **v0.153**
   - `config.ini` & program changes:
   - Fallback directory (`fallback_save_dir`)
-  - Option to create date-based sub-directories (i.e. `/detections_path/year/month/day/`)
+  - Option to create date-based sub-directories (i.e. `/yolo_detections_path/year/month/day/`)
 - **v0.152**
   - Added Conda/Mamba installer script for easier deployment
 - **v0.151**
