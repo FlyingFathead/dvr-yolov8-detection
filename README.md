@@ -37,7 +37,7 @@ Real-time detection also supports additional CUDA features such as CUDA video de
 
 ---
 
-🐳 For Docker setup, see the **[DOCKER_SETUP.md](./DOCKER_SETUP.md)** guide.
+🐳 For Docker setup, see the **[DOCKER_SETUP.md](./DOCKER_SETUP.md)** for a guide.
 
 ---
 
