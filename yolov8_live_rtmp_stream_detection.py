@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 #
 # yolov8_live_rtmp_stream_detection.py
-# Sept 14 // 2024
+# (Updated Oct 10, 2024)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.153
+version_number = 0.154
 
 import cv2
 import torch
@@ -43,6 +43,7 @@ def load_config(config_path='config.ini'):
 config = load_config()
 
 # Assign configurations to variables
+HEADLESS = config.getboolean('detection', 'headless', fallback=False)
 DEFAULT_CONF_THRESHOLD = config.getfloat('general', 'default_conf_threshold')
 DEFAULT_MODEL_VARIANT = config.get('general', 'default_model_variant')
 USE_WEBCAM = config.getboolean('input', 'use_webcam', fallback=False)
@@ -371,7 +372,7 @@ def frame_capture_thread(stream_url, use_webcam, webcam_index, frame_queue, stop
     main_logger.info("Video source closed.")
 
 # Frame processing thread
-def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectangles, denoise, process_fps, use_process_fps, detection_ongoing):
+def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectangles, denoise, process_fps, use_process_fps, detection_ongoing, headless):
     global last_tts_time, tts_thread, tts_stop_event
     model = load_model(DEFAULT_MODEL_VARIANT)
     use_cuda_denoising = cuda_denoising_available()
@@ -380,8 +381,9 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
     total_frames = 0
     detecting_human = False
 
-    # Create a named window with the ability to resize
-    cv2.namedWindow('Real-time Human Detection', cv2.WINDOW_NORMAL)
+    if not headless:
+        # Create a named window with the ability to resize
+        cv2.namedWindow('Real-time Human Detection', cv2.WINDOW_NORMAL)
 
     while not stop_event.is_set() or not frame_queue.empty():
         if not frame_queue.empty():
@@ -421,9 +423,10 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     x1, y1, x2, y2, confidence, class_idx = detection
                     if draw_rectangles:
                         x1, y1, x2, y2 = max(0, int(x1)), max(0, int(y1)), min(denoised_frame.shape[1], int(x2)), min(denoised_frame.shape[0], int(y2))
-                        cv2.rectangle(denoised_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        label = f'Person: {confidence:.2f}'
-                        cv2.putText(denoised_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                        if not headless:
+                            cv2.rectangle(denoised_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                            label = f'Person: {confidence:.2f}'
+                            cv2.putText(denoised_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                         main_logger.info(f"Rectangle drawn: {x1, y1, x2, y2} with confidence {confidence:.2f}")
                 if SAVE_DETECTIONS:
                     save_detection_image(denoised_frame, detection_count)
@@ -446,11 +449,12 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     detection_ongoing.clear()
                     tts_stop_event.set()  # Stop TTS when no human is detected
 
-            # Display the denoised frame
-            cv2.imshow('Real-time Human Detection', denoised_frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                stop_event.set()
-                break
+            if not headless:
+                # Display the denoised frame
+                cv2.imshow('Real-time Human Detection', denoised_frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    stop_event.set()
+                    break
 
             total_frames += 1
             if time.time() - last_log_time >= 1:
@@ -467,19 +471,24 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     time.sleep(time_to_wait)
 
     tts_stop_event.set()  # Ensure TTS stops if the program is stopping
-    cv2.destroyAllWindows()
+    if not headless:
+        cv2.destroyAllWindows()
 
 # When the user wants to exit
+HEADLESS = False  # Initialize globally
+
 def signal_handler(sig, frame):
     main_logger.info("Interrupt received, stopping, please wait for the program to finish...")
     stop_event.set()  # Signal threads to stop
-    cv2.destroyAllWindows()
+    if not HEADLESS:
+        cv2.destroyAllWindows()
     sys.exit(0)
     
 # Main
 if __name__ == "__main__":
     log_cuda_info()  # Add this line
     parser = argparse.ArgumentParser(description="YOLOv8 RTMP Stream Human Detection")
+    parser.add_argument("--headless", action='store_true', help="Run in headless mode without GUI display")
     parser.add_argument("--stream_url", type=str, default=STREAM_URL, help="URL of the RTMP stream")
     parser.add_argument("--use_webcam", type=bool, default=USE_WEBCAM, help="Use webcam for video input")
     parser.add_argument("--webcam_index", type=int, default=WEBCAM_INDEX, help="Index number of the webcam to use")
@@ -500,6 +509,11 @@ if __name__ == "__main__":
     parser.add_argument("--timeout", type=int, default=TIMEOUT, help="Timeout for the video stream in seconds")
 
     args = parser.parse_args()
+
+    # Override HEADLESS if --headless is specified
+    if args.headless:
+        HEADLESS = True
+        main_logger.info("Running in headless mode -- no GUI. Set 'headless' to 'false' if you want to run the GUI version.")
 
     # Initialize SAVE_DIR using the updated get_save_dir function
     try:
@@ -524,6 +538,7 @@ if __name__ == "__main__":
     PROCESS_FPS = args.process_fps
     USE_PROCESS_FPS = args.use_process_fps
     TIMEOUT = args.timeout
+    HEADLESS = args.headless
 
     frame_queue = Queue(maxsize=10)
     stop_event = Event()
@@ -535,7 +550,7 @@ if __name__ == "__main__":
 
     # Initialize threads
     capture_thread = Thread(target=frame_capture_thread, args=(STREAM_URL, USE_WEBCAM, WEBCAM_INDEX, frame_queue, stop_event))
-    processing_thread = Thread(target=frame_processing_thread, args=(frame_queue, stop_event, args.conf_threshold, DRAW_RECTANGLES, DENOISE, PROCESS_FPS, USE_PROCESS_FPS, detection_ongoing))
+    processing_thread = Thread(target=frame_processing_thread, args=(frame_queue, stop_event, args.conf_threshold, DRAW_RECTANGLES, DENOISE, PROCESS_FPS, USE_PROCESS_FPS, detection_ongoing, HEADLESS))
 
     try:
         capture_thread.start()
@@ -550,5 +565,6 @@ if __name__ == "__main__":
         if tts_thread is not None:
             tts_thread.join()
         main_logger.info("Cleaning up threads and resources.")
-        cv2.destroyAllWindows()
+        if not HEADLESS:
+            cv2.destroyAllWindows()
         main_logger.info("Program exited cleanly.")
