@@ -63,28 +63,36 @@ RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
     -D WITH_CUBLAS=1 \
     -D OPENCV_ENABLE_NONFREE=ON \
     -D BUILD_EXAMPLES=OFF \
+    -D WITH_GSTREAMER=ON \
+    -D WITH_LIBV4L=ON \
+    -D WITH_QT=ON \
+    -D WITH_OPENGL=ON \
+    -D BUILD_opencv_python3=ON \
     ..
 
 # Build OpenCV
 RUN make -j$(nproc) && make install && ldconfig
 
-# Verify OpenCV installation
-RUN echo "=============================================================="
-RUN echo "If OpenCV compilation was successful, it should show up below:"
-RUN echo "=============================================================="
-RUN python3 -c "import cv2; print(cv2.__version__)"
-RUN python3 -c "import cv2; print(cv2.cuda.getCudaEnabledDeviceCount())"
-RUN echo "=============================================================="
-
 # Install YOLOv8 and other Python dependencies
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-RUN pip install -r requirements.txt
+
+# Verify OpenCV installation and CUDA support in a single RUN command
+RUN echo "==============================================================" && \
+    echo "If OpenCV compilation was successful, it should show up below:" && \
+    echo "==============================================================" && \
+    python3 -c "import cv2; print('OpenCV Version:', cv2.__version__)" && \
+    python3 -c "import cv2; print('CUDA Enabled Devices:', cv2.cuda.getCudaEnabledDeviceCount())" && \
+    echo "==============================================================" && \
+    echo "Verification completed at $(date)"
 
 # Create a working directory for the application
 WORKDIR /app
 
 # Copy your application code into the container
 COPY . /app
+
+# install repository requirements
+RUN pip install -r requirements.txt
 
 # Expose any necessary ports (if applicable)
 # Example: EXPOSE 8000
