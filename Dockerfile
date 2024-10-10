@@ -100,4 +100,9 @@ RUN pip install -r requirements.txt
 # Example: EXPOSE 8000
 
 # Define the entrypoint or command
-CMD ["python3", "yolov8_live_rtmp_stream_detection.py"]
+
+# Run the detection with GUI (requires x11docker or a X11 passthrough method!)
+# CMD ["python3", "yolov8_live_rtmp_stream_detection.py"]
+
+# Run headless (unless you're configuring X11 passthrough, this might be easier)
+CMD ["python3", "yolov8_live_rtmp_stream_detection.py", "--headless"]

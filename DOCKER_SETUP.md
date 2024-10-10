@@ -148,10 +148,23 @@ You have two options to run the Docker container: **Manually** or using the prov
      -v ./logs:/app/logs \
      yolov8_detection:latest
    ```
+
    - **Flags Explained:**
      - `-v ./config.ini:/app/config.ini`: Mounts your custom `config.ini` into the container.
      - `-v ./yolo_detections:/app/yolo_detections`: Persists detection images to the host.
      - `-v ./logs:/app/logs`: Stores log files on the host for easy access.
+
+You can also try running the application with X11 forwarding on Linux systems:
+
+   ```bash
+   docker run --gpus all --network=host --rm \
+    -e DISPLAY=$DISPLAY \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
+     -v ./config.ini:/app/config.ini \
+     -v ./yolo_detections:/app/yolo_detections \
+     -v ./logs:/app/logs \
+     yolov8_detection:latest
+   ```
 
 #### **Option 2: Using the `run_dockerized.sh` Script**
 
