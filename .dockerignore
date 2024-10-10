@@ -1,0 +1,28 @@
+# Python cache files
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Git repository
+.git
+.gitignore
+
+# Docker files
+Dockerfile
+docker-compose.yml
+
+# Exclude large files and directories not needed for the build
+node_modules
+*.log
+*.zip
+*.tar
+*.gz
+
+# Any other directories or files you don't need in the build context
+data/
+tests/
+docs/
+examples/
+logs/
+yolo_detections/
