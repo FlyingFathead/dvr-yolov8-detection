@@ -34,14 +34,22 @@ function check_docker_service {
     fi
 }
 
-# Function to check if user is in the docker group
-function check_docker_group {
-    if groups "$USER" | grep &>/dev/null '\bdocker\b'; then
-        echo_success "User '$USER' is in the 'docker' group. Docker commands can be run without sudo."
+# Function to check if user has access to Docker commands
+function check_docker_access {
+    # Test Docker access
+    if docker info &> /dev/null; then
+        echo_success "Docker commands can be run without sudo."
         USE_SUDO=false
     else
-        echo_error "User '$USER' is NOT in the 'docker' group. Docker commands will require sudo."
-        USE_SUDO=true
+        echo_error "Current user cannot access Docker commands without sudo."
+        # Test with sudo
+        if sudo docker info &> /dev/null; then
+            echo_success "Docker commands can be run with sudo."
+            USE_SUDO=true
+        else
+            echo_error "Cannot access Docker even with sudo. Exiting."
+            exit 1
+        fi
     fi
 }
 
@@ -86,7 +94,7 @@ function run_docker_container {
 # Main script execution
 check_docker_installed
 check_docker_service
-check_docker_group
+check_docker_access  # Added check for Docker access
 check_docker_image
 
 if [ "$IMAGE_AVAILABLE" = false ]; then
