@@ -28,6 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     python3-dev \    
     python3-pip \
+    espeak-ng \
+    libespeak-ng1 \    
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip for Python 3.12
