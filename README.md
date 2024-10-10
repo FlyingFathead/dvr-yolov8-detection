@@ -467,7 +467,8 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 ## Changelog
 
 - (Oct-10-2024) 🐳 **Dockerized Setup Now Available!** 🐳
-  - No other version changes; added Docker as an install method to ease the setup process
+  - Added Docker as an install method to ease the setup process
+  - _(no other version changes)_
 - **v0.153**
   - `config.ini` & program changes:
   - Fallback directory (`fallback_save_dir`)
