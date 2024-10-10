@@ -4,3 +4,5 @@ LICENSE
 yolo_detections/**
 old/
 old/**
+utils/
+utils/**
