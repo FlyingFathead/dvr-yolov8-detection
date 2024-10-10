@@ -65,7 +65,7 @@ If you're missing the GUI part in your Dockerized setup guide, the section on Do
 
 Here’s a quick update you could make to include the GUI setup:
 
-### 🖥️ **Running the GUI Applications (OpenCV GUI)**
+### 🖥️ **Running the Application With GUI (OpenCV GUI)**
 
 To display OpenCV GUI windows from within the Docker container, you will need to configure X11 forwarding or use a tool like **x11docker** to handle GUI applications securely. Here's how to set it up:
 
