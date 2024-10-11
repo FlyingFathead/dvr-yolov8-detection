@@ -10,7 +10,8 @@ ENV LANG=C.UTF-8
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcudnn8 libcudnn8-dev \
-    nvidia-cuda-dev nvidia-cuda-doc nvidia-cuda-gdb \
+    nvidia-cuda-dev \
+    nvidia-cuda-gdb \
     gcc-10 g++-10 \
     build-essential \
     cuda-toolkit-12-6 \
