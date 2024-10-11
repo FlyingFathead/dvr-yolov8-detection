@@ -7,6 +7,10 @@ ENV LANG=C.UTF-8
 
 # nvidia-cuda-toolkit \
 # Add NVIDIA’s repo key and set up the proper repository for the latest CUDA versions
+# Get `wget` first
+RUN apt-get update && apt-get install -y --no-install-recommends wget
+
+# Then, run the keyring in
 RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb && \
     dpkg -i cuda-keyring_1.0-1_all.deb && \
     apt-get update
