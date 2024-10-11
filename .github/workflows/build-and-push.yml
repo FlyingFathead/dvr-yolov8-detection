@@ -54,7 +54,9 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new
-
+          build-args: |
+            --progress=plain          
+          
       # Step 6: Update cache
       - name: Update cache
         if: success()
