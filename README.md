@@ -260,7 +260,10 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
-
+- **v0.157** (Oct-11-2024) **webUI updates**
+  - Better refreshed data via AJAX
+  - Minimized lock holding time `web_server.py` => better FPS
+  - `webserver_max_fps` value to cap the framerate on the webUI for better performance
 - **v0.156** (Oct-11-2024) **Detection graphs in web UI**
   - Added `matplotlib` based detection graphs to the web UI
   - (selectable between 1hr/24hrs/week/month/year)

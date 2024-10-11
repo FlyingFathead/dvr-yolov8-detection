@@ -6,7 +6,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.157
+version_number = 0.158
 
 import cv2
 import torch
@@ -461,12 +461,23 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
 
                 for detection in detections:
                     x1, y1, x2, y2, confidence, class_idx = detection
+
+                    # Convert NumPy data types to native Python types
                     detection_info = {
-                        'frame_count': total_frames,
+                        'frame_count': int(total_frames),
                         'timestamp': timestamp,
-                        'coordinates': (x1, y1, x2, y2),
-                        'confidence': confidence
-                    }
+                        'coordinates': (
+                            int(x1), int(y1), int(x2), int(y2)
+                        ),
+                        'confidence': float(confidence)
+                    }                    
+
+                    # detection_info = {
+                    #     'frame_count': total_frames,
+                    #     'timestamp': timestamp,
+                    #     'coordinates': (x1, y1, x2, y2),
+                    #     'confidence': confidence
+                    # }
 
                     # for webui; record detection timestamp
                     current_time = time.time()
@@ -549,7 +560,16 @@ def signal_handler(sig, frame):
     if not HEADLESS and not ENABLE_WEBSERVER:
         cv2.destroyAllWindows()
     sys.exit(0)
-    
+
+# Making sure the data is compliant
+def sanitize_detection_data(detection):
+    return {
+        'frame_count': int(detection['frame_count']),
+        'timestamp': str(detection['timestamp']),
+        'coordinates': [int(coord) for coord in detection['coordinates']],
+        'confidence': float(detection['confidence'])
+    }
+
 # Main
 if __name__ == "__main__":
     log_cuda_info()  # Add this line
@@ -604,9 +624,11 @@ if __name__ == "__main__":
                 logs_list,
                 detections_lock,
                 logs_lock,
+                config
                 # detection_timestamps,  # Pass detection_timestamps
                 # timestamps_lock        # Pass timestamps_lock
-            )
+            ),
+            daemon=True  # Set as daemon
         )
         web_server_thread.daemon = True
         web_server_thread.start()
