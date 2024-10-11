@@ -1,5 +1,5 @@
 # Use NVIDIA CUDA base image with Ubuntu 22.04
-FROM nvidia/cuda:12.6.0-base-ubuntu22.04
+FROM nvidia/cuda:12.4.0-base-ubuntu22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -24,7 +24,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libcudnn9-cuda-12 \
     libcudnn9-dev-cuda-12 \
-    cuda-toolkit-12-6 \
+    cuda-toolkit-12-4 \
     cmake \
     git \
     wget \
@@ -93,6 +93,8 @@ RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
 
 # Build OpenCV
 RUN make -j$(nproc) && make install && ldconfig
+
+RUN python3 -m pip install --upgrade pip
 
 # Install YOLOv8 and other Python dependencies
 RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
