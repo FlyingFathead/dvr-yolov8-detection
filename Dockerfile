@@ -7,6 +7,7 @@ ENV LANG=C.UTF-8
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc-10 g++-10 \
     build-essential \
     nvidia-cuda-toolkit \
     cmake \
@@ -56,9 +57,10 @@ RUN wget -O opencv.zip https://github.com/opencv/opencv/archive/${OPENCV_VERSION
 # Create build directory
 WORKDIR /opt/opencv_build/opencv/build
 
-# Configure OpenCV with CUDA
+# Configure OpenCV with CUDA and set GCC/G++ 10
 RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
-    -D CMAKE_CXX_STANDARD=14 \
+    -D CMAKE_C_COMPILER=gcc-10 \
+    -D CMAKE_CXX_COMPILER=g++-10 \
     -D CMAKE_INSTALL_PREFIX=/usr/local \
     -D OPENCV_EXTRA_MODULES_PATH=/opt/opencv_build/opencv_contrib/modules \
     -D WITH_CUDA=ON \
