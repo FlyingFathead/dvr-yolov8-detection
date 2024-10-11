@@ -1,15 +1,19 @@
 # Use NVIDIA CUDA base image with Ubuntu 22.04
-FROM nvidia/cuda:12.4.0-base-ubuntu22.04
+FROM nvidia/cuda:12.6.0-base-ubuntu22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
+# nvidia-cuda-toolkit \
+
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libcudnn8 libcudnn8-dev \
+    nvidia-cuda-dev nvidia-cuda-doc nvidia-cuda-gdb \
     gcc-10 g++-10 \
     build-essential \
-    nvidia-cuda-toolkit \
+    cuda-toolkit-12-6 \
     cmake \
     git \
     wget \
