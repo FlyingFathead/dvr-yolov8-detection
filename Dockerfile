@@ -6,6 +6,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
 # nvidia-cuda-toolkit \
+# Add NVIDIA’s repo key and set up the proper repository for the latest CUDA versions
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb && \
+    dpkg -i cuda-keyring_1.0-1_all.deb && \
+    apt-get update
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,6 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     nvidia-cuda-gdb \
     gcc-10 g++-10 \
     build-essential \
+    libcudnn9-cuda-12 \
+    libcudnn9-dev-cuda-12 \
     cuda-toolkit-12-6 \
     cmake \
     git \
