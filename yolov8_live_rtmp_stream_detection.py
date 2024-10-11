@@ -6,7 +6,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.154
+version_number = 0.155
 
 import cv2
 import torch
@@ -28,6 +28,9 @@ import configparser
 import argparse
 import signal
 import sys
+
+# Import web server functions
+from web_server import start_web_server, set_output_frame
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -70,9 +73,12 @@ ENABLE_DETECTION_LOGGING_TO_FILE = config.getboolean('logging', 'enable_detectio
 LOG_DIRECTORY = config.get('logging', 'log_directory')
 LOG_FILE = config.get('logging', 'log_file')
 DETECTION_LOG_FILE = config.get('logging', 'detection_log_file')
-
 # New configuration for creating date-based subdirectories
 CREATE_DATE_SUBDIRS = config.getboolean('detection', 'create_date_subdirs', fallback=False)
+# Web server configuration
+ENABLE_WEBSERVER = config.getboolean('webserver', 'enable_webserver', fallback=False)
+WEBSERVER_HOST = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
+WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
 
 # Define the main logger
 main_logger = logging.getLogger('main')
@@ -449,12 +455,22 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     detection_ongoing.clear()
                     tts_stop_event.set()  # Stop TTS when no human is detected
 
-            if not headless:
+            if ENABLE_WEBSERVER:
+                # Send the processed frame to the web server
+                set_output_frame(denoised_frame)
+            elif not headless:
                 # Display the denoised frame
                 cv2.imshow('Real-time Human Detection', denoised_frame)
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     stop_event.set()
                     break
+
+            # if not headless:
+            #     # Display the denoised frame
+            #     cv2.imshow('Real-time Human Detection', denoised_frame)
+            #     if cv2.waitKey(1) & 0xFF == ord('q'):
+            #         stop_event.set()
+            #         break
 
             total_frames += 1
             if time.time() - last_log_time >= 1:
@@ -480,7 +496,7 @@ HEADLESS = False  # Initialize globally
 def signal_handler(sig, frame):
     main_logger.info("Interrupt received, stopping, please wait for the program to finish...")
     stop_event.set()  # Signal threads to stop
-    if not HEADLESS:
+    if not HEADLESS and not ENABLE_WEBSERVER:
         cv2.destroyAllWindows()
     sys.exit(0)
     
@@ -507,13 +523,31 @@ if __name__ == "__main__":
     parser.add_argument("--process_fps", type=int, default=PROCESS_FPS, help="Frames per second for processing")
     parser.add_argument("--use_process_fps", type=bool, default=USE_PROCESS_FPS, help="Whether to use custom processing FPS")
     parser.add_argument("--timeout", type=int, default=TIMEOUT, help="Timeout for the video stream in seconds")
+    parser.add_argument("--enable_webserver", action='store_true', help="Enable the web server for streaming detections")
+    parser.add_argument("--webserver_host", type=str, help="Host IP address for the web server")
+    parser.add_argument("--webserver_port", type=int, help="Port number for the web server")
 
     args = parser.parse_args()
 
+    # Override configurations based on command-line arguments
+    if args.enable_webserver:
+        ENABLE_WEBSERVER = True
+    if args.webserver_host:
+        WEBSERVER_HOST = args.webserver_host
+    if args.webserver_port:
+        WEBSERVER_PORT = args.webserver_port
+
     # Override HEADLESS if --headless is specified
-    if args.headless:
+    if args.headless or ENABLE_WEBSERVER:
         HEADLESS = True
-        main_logger.info("Running in headless mode -- no GUI. Set 'headless' to 'false' if you want to run the GUI version.")
+        main_logger.info("Running in headless mode -- no GUI. Set 'headless' AND 'enable_webserver' to 'false' if you want to run the windowed GUI version.")
+
+    if ENABLE_WEBSERVER:
+        # Start the web server in a separate daemon thread
+        web_server_thread = threading.Thread(target=start_web_server, args=(WEBSERVER_HOST, WEBSERVER_PORT))
+        web_server_thread.daemon = True
+        web_server_thread.start()
+        main_logger.info(f"Web server started at http://{WEBSERVER_HOST}:{WEBSERVER_PORT}")
 
     # Initialize SAVE_DIR using the updated get_save_dir function
     try:
@@ -565,6 +599,6 @@ if __name__ == "__main__":
         if tts_thread is not None:
             tts_thread.join()
         main_logger.info("Cleaning up threads and resources.")
-        if not HEADLESS:
+        if not HEADLESS and not ENABLE_WEBSERVER:
             cv2.destroyAllWindows()
         main_logger.info("Program exited cleanly.")

@@ -139,6 +139,8 @@ Real-time detection also supports additional CUDA features such as CUDA video de
 
 This project supports real-time object detection from RTMP streams or USB webcams using YOLOv8. The provided `run_detection.sh` script ensures the detection script runs continuously, automatically restarting if it exits.
 
+**(New in v0.155)**: The real-time detection now comes with a mini web server running on Flask that enables you to run the detection framework in your browser by default when `headless` and `enable_webserver` are set to `true`. This will make headless deployment very easy. Note that it listens on `0.0.0.0:5000` by default, which you might want to change (i.e. to `127.0.0.1:5000`) for safety reasons.
+
 ### Usage
 
 #### **1. For RTMP Streams:**
@@ -176,19 +178,27 @@ This project supports real-time object detection from RTMP streams or USB webcam
   - Set `use_webcam` to `true`.
   - Set `webcam_index` to your desired webcam index.
 
-### Program Configuration
+### Configuration
 
-Configure various parameters by editing the `config.ini` file. This allows you to set program parameters such as the input source, input stream address, output directory, confidence threshold, model variant, stream URL, and more.
+#### Running Headless / As A Web Server
 
-### Example NGINX Configuration
+Due to Docker being a popular install option, you can run the program headless and with a `Flask` based mini-web server included. Compared to the regular GUI verison, there is likely a small framerate dip and latency in the output, but other than that, the functionality is not too far off from the GUI variant. 
+
+In headless Docker installs, make sure that `headless` and `enable_webserver` are both set to `true`.
+
+#### Editing Program Configuration
+
+You can configure the program's parameters by editing the `config.ini` file. This allows you to set program parameters such as the input source, input stream address, output directory, confidence threshold, model variant, stream URL, and more.
+
+### (For RTMP Sources) Example NGINX Configuration
 
 An example NGINX configuration is provided in `example-nginx.conf`. This config sets up an RTMP server that listens on `127.0.0.1:1935` and allows local clients to publish and play streams.
 
-### RTMP Loopback Script
+### (For RTMP Sources) RTMP Loopback Script
 
 To stream and process the video in real-time, use the `ffmpeg_video_stream_loopback.sh` script. Ensure your streaming client (e.g., OBS Studio) is set to stream to `rtmp://127.0.0.1:1935/live`.
 
-### Windows Users / Platform-Agnostic Loopback for RTMP
+### (For RTMP Sources) Windows Users / Platform-Agnostic Loopback for RTMP
 
 Use the `utils/loopback_test_unit_ffmpeg-python.py` script to set up a loopback for your RTMP stream.
 
@@ -258,6 +268,12 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 
 ## Changelog
 
+- **v0.155** (Oct-11-2024) **Now comes with a Flask web server!**
+  - The video feed can be monitored real-time using the web interface
+  - Added a `Flask` mini web server to take care of the streams
+  - `enable_webserver` and `headless` both set to `true` by default
+  - Server listens at `0.0.0.0:5000` (see `config.ini` for more)  
+  - This enables quick deployment especially in headless / Docker setups
 - **v0.154** (Oct-10-2024) 🐳 **Dockerized Setup Now Available!** 🐳
   - Headless mode added for non-GUI/Docker/detection-only modes
     - enable in `config.ini` with `headless = true`
