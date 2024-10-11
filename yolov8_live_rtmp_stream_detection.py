@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 #
 # yolov8_live_rtmp_stream_detection.py
 # (Updated Oct 10, 2024)
@@ -13,7 +12,7 @@ import torch
 import logging
 import numpy as np
 
-# time and tz related
+# Time and timezone related
 import time
 from datetime import datetime
 import pytz
@@ -35,17 +34,13 @@ from web_server import start_web_server, set_output_frame
 
 # Shared data structures
 detections_list = deque(maxlen=100)  # Store up to 100 latest detections on web UI
-logs_list = deque(maxlen=100)        # Store up to 100 latest logs won web UI
-# Increase the maxlen to store more data
+logs_list = deque(maxlen=100)        # Store up to 100 latest logs on web UI
 detection_timestamps = deque(maxlen=10000)  # Store up to 10,000 timestamps
 
 # Locks for thread safety
 timestamps_lock = threading.Lock()
 detections_lock = threading.Lock()
 logs_lock = threading.Lock()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # Load configuration from `config.ini` file with case-sensitive keys
 def load_config(config_path='config.ini'):
@@ -104,43 +99,78 @@ class ListHandler(logging.Handler):
         with self.logs_lock:
             self.logs_list.append(log_entry)
 
-# Define the main logger
-main_logger = logging.getLogger('main')
-main_logger.setLevel(logging.INFO)
+# Centralized Logging Configuration
+def setup_logging():
+    # Create a root logger with StreamHandler
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Prevent root logger from propagating to higher loggers (if any)
+    root_logger.propagate = False
+    
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+    
+    # Create and add StreamHandler to root logger
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(logging.INFO)
+    stream_handler.setFormatter(formatter)
+    root_logger.addHandler(stream_handler)
+    
+    # Define the main logger
+    main_logger = logging.getLogger('main')
+    main_logger.setLevel(logging.INFO)
+    main_logger.propagate = False  # Prevent propagation to root
+    
+    # Add ListHandler to main_logger to capture WARNING and ERROR logs
+    list_handler = ListHandler(logs_list, logs_lock)
+    list_handler.setLevel(logging.WARNING)  # Capture WARNING and ERROR logs
+    list_handler.setFormatter(formatter)
+    main_logger.addHandler(list_handler)
+    
+    # **Add StreamHandler to main_logger for INFO level logs**
+    stream_handler_main = logging.StreamHandler(sys.stdout)
+    stream_handler_main.setLevel(logging.INFO)
+    stream_handler_main.setFormatter(formatter)
+    main_logger.addHandler(stream_handler_main)
+    
+    # Define detection logger
+    detection_logger = logging.getLogger('detection')
+    detection_logger.setLevel(logging.INFO)
+    detection_logger.propagate = False  # Prevent propagation to root
+    
+    # Initialize detection_log_path
+    detection_log_path = None
+    
+    # Add FileHandler to detection_logger if enabled
+    if ENABLE_DETECTION_LOGGING_TO_FILE:
+        if not os.path.exists(LOG_DIRECTORY):
+            os.makedirs(LOG_DIRECTORY)
+        detection_log_path = os.path.join(LOG_DIRECTORY, DETECTION_LOG_FILE)
+        detection_file_handler = logging.FileHandler(detection_log_path)
+        detection_file_handler.setLevel(logging.INFO)
+        detection_file_handler.setFormatter(formatter)
+        detection_logger.addHandler(detection_file_handler)
+        main_logger.info(f"Detection logging to file is enabled. Logging to: {detection_log_path}")
+    else:
+        main_logger.info("Detection logging to file is disabled.")
+    
+    # Define web_server logger
+    web_server_logger = logging.getLogger('web_server')
+    web_server_logger.setLevel(logging.INFO)
+    web_server_logger.propagate = False  # Prevent propagation to root
+    
+    # Add StreamHandler to web_server_logger if not already present
+    if not web_server_logger.hasHandlers():
+        web_stream_handler = logging.StreamHandler(sys.stdout)
+        web_stream_handler.setLevel(logging.INFO)
+        web_stream_handler.setFormatter(formatter)
+        web_server_logger.addHandler(web_stream_handler)
+    
+    return main_logger, detection_logger, web_server_logger, detection_log_path
 
-# Clear existing handlers if they exist
-if main_logger.hasHandlers():
-    main_logger.handlers.clear()
-
-# Configure main logger for console output
-stream_handler = logging.StreamHandler()
-stream_handler.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-stream_handler.setFormatter(formatter)
-main_logger.addHandler(stream_handler)
-
-# Add custom ListHandler to capture logs
-list_handler = ListHandler(logs_list, logs_lock)
-list_handler.setLevel(logging.WARNING)  # Capture WARNING and ERROR logs
-list_handler.setFormatter(formatter)
-main_logger.addHandler(list_handler)
-
-# Configure detection logger if enabled
-detection_logger = logging.getLogger('detection')
-detection_logger.setLevel(logging.INFO)
-
-# Check if detection logging to file is enabled
-if ENABLE_DETECTION_LOGGING_TO_FILE:
-    if not os.path.exists(LOG_DIRECTORY):
-        os.makedirs(LOG_DIRECTORY)
-    detection_log_path = os.path.join(LOG_DIRECTORY, DETECTION_LOG_FILE)
-    detection_file_handler = logging.FileHandler(detection_log_path)
-    detection_file_handler.setLevel(logging.INFO)
-    detection_file_handler.setFormatter(formatter)
-    detection_logger.addHandler(detection_file_handler)
-    main_logger.info(f"Detection logging to file is enabled. Logging to: {detection_log_path}")
-else:
-    main_logger.info("Detection logging to file is disabled.")
+# Initialize logging
+main_logger, detection_logger, web_server_logger, detection_log_path = setup_logging()
 
 # Timekeeping and frame counting
 last_log_time = time.time()
@@ -572,26 +602,26 @@ def sanitize_detection_data(detection):
 
 # Main
 if __name__ == "__main__":
-    log_cuda_info()  # Add this line
+    log_cuda_info()  # Log CUDA information
     parser = argparse.ArgumentParser(description="YOLOv8 RTMP Stream Human Detection")
     parser.add_argument("--headless", action='store_true', help="Run in headless mode without GUI display")
     parser.add_argument("--stream_url", type=str, default=STREAM_URL, help="URL of the RTMP stream")
-    parser.add_argument("--use_webcam", type=bool, default=USE_WEBCAM, help="Use webcam for video input")
+    parser.add_argument("--use_webcam", action='store_true', help="Use webcam for video input")
     parser.add_argument("--webcam_index", type=int, default=WEBCAM_INDEX, help="Index number of the webcam to use")
     parser.add_argument("--conf_threshold", type=float, default=DEFAULT_CONF_THRESHOLD, help="Confidence threshold for detections")
     parser.add_argument("--model_variant", type=str, default=DEFAULT_MODEL_VARIANT, help="YOLOv8 model variant to use")
-    parser.add_argument("--draw_rectangles", type=bool, default=DRAW_RECTANGLES, help="Draw rectangles around detected objects")
-    parser.add_argument("--save_detections", type=bool, default=SAVE_DETECTIONS, help="Save images with detections")
+    parser.add_argument("--draw_rectangles", action='store_true', help="Draw rectangles around detected objects")
+    parser.add_argument("--save_detections", action='store_true', help="Save images with detections")
     parser.add_argument("--image_format", type=str, default=IMAGE_FORMAT, help="Image format for saving detections (jpg or png)")
     parser.add_argument("--save_dir", type=str, default=None, help="Directory to save detection images")  # Changed default to None
     # Removed fallback_save_dir from arguments as it's handled via config.ini
     parser.add_argument("--retry_delay", type=int, default=RETRY_DELAY, help="Delay between retries to connect to the stream")
     parser.add_argument("--max_retries", type=int, default=MAX_RETRIES, help="Maximum number of retries to connect to the stream")
-    parser.add_argument("--rescale_input", type=bool, default=RESCALE_INPUT, help="Rescale the input frames")
+    parser.add_argument("--rescale_input", action='store_true', help="Rescale the input frames")
     parser.add_argument("--target_height", type=int, default=TARGET_HEIGHT, help="Target height for rescaling the frames")
-    parser.add_argument("--denoise", type=bool, default=DENOISE, help="Toggle denoising on/off")
+    parser.add_argument("--denoise", action='store_true', help="Toggle denoising on/off")
     parser.add_argument("--process_fps", type=int, default=PROCESS_FPS, help="Frames per second for processing")
-    parser.add_argument("--use_process_fps", type=bool, default=USE_PROCESS_FPS, help="Whether to use custom processing FPS")
+    parser.add_argument("--use_process_fps", action='store_true', help="Whether to use custom processing FPS")
     parser.add_argument("--timeout", type=int, default=TIMEOUT, help="Timeout for the video stream in seconds")
     parser.add_argument("--enable_webserver", action='store_true', help="Enable the web server for streaming detections")
     parser.add_argument("--webserver_host", type=str, help="Host IP address for the web server")
@@ -630,7 +660,6 @@ if __name__ == "__main__":
             ),
             daemon=True  # Set as daemon
         )
-        web_server_thread.daemon = True
         web_server_thread.start()
         main_logger.info(f"Web server started at http://{WEBSERVER_HOST}:{WEBSERVER_PORT}")
 

@@ -260,6 +260,9 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.158** (Oct-11-2024) **Even more webUI updates**
+  - Human detections get aggregated in the webUI within a cooldown period
+  - (default cooldown period: 30 seconds)
 - **v0.157** (Oct-11-2024) **webUI updates**
   - Better refreshed data via AJAX
   - Minimized lock holding time `web_server.py` => better FPS
