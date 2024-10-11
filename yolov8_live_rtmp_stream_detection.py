@@ -6,7 +6,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.155
+version_number = 0.157
 
 import cv2
 import torch
@@ -36,8 +36,11 @@ from web_server import start_web_server, set_output_frame
 # Shared data structures
 detections_list = deque(maxlen=100)  # Store up to 100 latest detections on web UI
 logs_list = deque(maxlen=100)        # Store up to 100 latest logs won web UI
+# Increase the maxlen to store more data
+detection_timestamps = deque(maxlen=10000)  # Store up to 10,000 timestamps
 
 # Locks for thread safety
+timestamps_lock = threading.Lock()
 detections_lock = threading.Lock()
 logs_lock = threading.Lock()
 
@@ -464,8 +467,16 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                         'coordinates': (x1, y1, x2, y2),
                         'confidence': confidence
                     }
+
+                    # for webui; record detection timestamp
+                    current_time = time.time()
+                    with timestamps_lock:
+                        detection_timestamps.append(current_time)
+
+                    # for webui; use appendleft to show recent detections first
                     with detections_lock:
-                        detections_list.appendleft(detection_info)  # Use appendleft to show recent detections first                    
+                        detections_list.appendleft(detection_info)
+
                     if draw_rectangles:
                         x1, y1, x2, y2 = max(0, int(x1)), max(0, int(y1)), min(denoised_frame.shape[1], int(x2)), min(denoised_frame.shape[0], int(y2))
                         if not headless:
@@ -583,8 +594,20 @@ if __name__ == "__main__":
 
     if ENABLE_WEBSERVER:
         # Start the web server in a separate daemon thread
-        # web_server_thread = threading.Thread(target=start_web_server, args=(WEBSERVER_HOST, WEBSERVER_PORT))
-        web_server_thread = threading.Thread(target=start_web_server, args=(WEBSERVER_HOST, WEBSERVER_PORT, detections_list, logs_list, detections_lock, logs_lock))
+        web_server_thread = threading.Thread(
+            target=start_web_server,
+            args=(
+                WEBSERVER_HOST,
+                WEBSERVER_PORT,
+                detection_log_path,                
+                detections_list,
+                logs_list,
+                detections_lock,
+                logs_lock,
+                # detection_timestamps,  # Pass detection_timestamps
+                # timestamps_lock        # Pass timestamps_lock
+            )
+        )
         web_server_thread.daemon = True
         web_server_thread.start()
         main_logger.info(f"Web server started at http://{WEBSERVER_HOST}:{WEBSERVER_PORT}")

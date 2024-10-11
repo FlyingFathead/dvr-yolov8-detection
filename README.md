@@ -46,20 +46,13 @@ Real-time detection also supports additional CUDA features such as CUDA video de
 ## Requirements
 
 - **Python 3.6+** (Python 3.10.x recommended)
-  - **Modules:**
-    - `torch`
-    - `ultralytics` (YOLO)
-    - `opencv-python` (CUDA-enabled recommended for faster processing)
-    - `numpy`
-    - `pyttsx3` (for text-to-speech alerts)
-    - `ffmpeg-python` (for video streams)
-    - `pytz`
-
+  - **Python modules:**
+  - See [requirements.txt](./requirements.txt)
 - **FFmpeg** 
 - **Python 3.10.x**
 - If you wish to use CUDA GPU acceleration, you will need:
   - A Nvidia GPU that supports CUDA
-  - Install **CUDA 11.8** or higher to enable GPU-accelerated processing
+  - Install **CUDA 11.8 or higher** to enable GPU-accelerated processing
 - Use **Miniconda** or **Mamba** for environment management
 
 ## Installation (Conda/Mamba Environments)
@@ -268,6 +261,9 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 
 ## Changelog
 
+- **v0.156** (Oct-11-2024) **Detection graphs in web UI**
+  - Added `matplotlib` based detection graphs to the web UI
+  - (selectable between 1hr/24hrs/week/month/year)
 - **v0.155** (Oct-11-2024) **Now comes with a Flask web server!**
   - The video feed can be monitored real-time using the web interface
   - Added a `Flask` mini web server to take care of the streams

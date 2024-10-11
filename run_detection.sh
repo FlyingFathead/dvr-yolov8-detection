@@ -2,6 +2,7 @@
 
 # Path to the YOLOv8 RTMP stream detection script
 SCRIPT_PATH="./yolov8_live_rtmp_stream_detection.py"
+CMDLINE_OPTS="--headless --enable_webserver --webserver_host 127.0.0.1"
 
 # Default environment type
 ENV_TYPE="conda"  # Options: conda, virtualenv, none
@@ -64,7 +65,7 @@ trap terminate_script SIGINT SIGTERM
 # Function to run the script
 run_script() {
     while true; do
-        echo "Starting YOLOv8 RTMP Stream Detection script..."
+        echo "Starting YOLOv8 RTMP Stream Detection Start Script..."
 
         case $ENV_TYPE in
             conda)
@@ -72,7 +73,7 @@ run_script() {
                     echo "Activating Conda environment '$CONDA_ENV_NAME'."
                     conda activate "$CONDA_ENV_NAME"
                     # Run the script
-                    python "$SCRIPT_PATH"
+                    python "$SCRIPT_PATH" $CMDLINE_OPTS
                     # Capture the exit code
                     EXIT_CODE=$?
                     # Deactivate the environment after the script finishes
@@ -85,7 +86,7 @@ run_script() {
             virtualenv)
                 if check_venv; then
                     echo "Using the active virtual environment at '$VIRTUAL_ENV'."
-                    python "$SCRIPT_PATH"
+                    python "$SCRIPT_PATH" $CMDLINE_OPTS
                     EXIT_CODE=$?
                 else
                     echo "No virtual environment is active. Exiting."
@@ -94,7 +95,7 @@ run_script() {
                 ;;
             none)
                 echo "Proceeding without activating any environment."
-                python "$SCRIPT_PATH"
+                python "$SCRIPT_PATH" $CMDLINE_OPTS
                 EXIT_CODE=$?
                 ;;
             *)

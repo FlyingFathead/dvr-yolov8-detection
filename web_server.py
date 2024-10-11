@@ -6,9 +6,10 @@
 
 import threading
 import time
-from flask import Flask, Response, render_template_string, stream_with_context
+from flask import Flask, Response, render_template_string, stream_with_context, request
 import cv2
 import logging
+from web_graph import generate_detection_graph
 
 # Configure logging for the web server
 logger = logging.getLogger('web_server')
@@ -20,9 +21,10 @@ app = Flask(__name__)
 output_frame = None
 frame_lock = threading.Lock()
 
-def start_web_server(host='0.0.0.0', port=5000, detections_list=None, logs_list=None, detections_lock=None, logs_lock=None):
+def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None, detections_list=None, logs_list=None, detections_lock=None, logs_lock=None):
     """Starts the Flask web server."""
     logger.info(f"Starting web server at http://{host}:{port}")
+    app.config['detection_log_path'] = detection_log_path
     app.config['detections_list'] = detections_list
     app.config['logs_list'] = logs_list
     app.config['detections_lock'] = detections_lock
@@ -76,6 +78,26 @@ def index():
         detections = list(app.config['detections_list'])
     with app.config['logs_lock']:
         logs = list(app.config['logs_list'])
+
+    # # Get the selected time range from query parameters
+    # hours = request.args.get('hours', default=None, type=int)
+    # graph_image = None
+    # if hours:
+    #     graph_image = generate_detection_graph(hours)
+
+    # # Get the selected time range from query parameters
+    # hours = request.args.get('hours', default=None, type=int)
+    # graph_image = None
+    # if hours:
+    #     graph_image = generate_detection_graph(hours, app.config['detection_timestamps'], app.config['timestamps_lock'])
+
+    # Get the selected time range from query parameters
+    hours = request.args.get('hours', default=None, type=int)
+    graph_image = None
+    if hours:
+        detection_log_path = app.config['detection_log_path']
+        graph_image = generate_detection_graph(hours, detection_log_path)
+
     return render_template_string('''
         <html>
         <head>
@@ -104,6 +126,35 @@ def index():
                 <li>{{ log }}</li>
             {% endfor %}
             </ul>
+                                  
+            <h2>Detection Graphs</h2>
+            <form action="/" method="get">
+                <label for="hours">Select Time Range:</label>
+                <select name="hours" id="hours">
+                    <option value="1">Last 1 Hour</option>
+                    <option value="3">Last 3 Hours</option>
+                    <option value="24">Last 24 Hours</option>
+                    <option value="168">Last Week</option>
+                    <option value="720">Last Month</option>
+                </select>
+                <input type="submit" value="View Graph">
+            </form>
+
+            <!-- Include the graph image if available -->
+            {% if graph_image %}
+                <h3>Detections Over Time</h3>
+                <img src="data:image/png;base64,{{ graph_image }}">
+            {% endif %}
+
         </body>
         </html>
-    ''', detections=detections, logs=logs)
+    ''', detections=detections, logs=logs, graph_image=graph_image)
+
+@app.route('/detection_graph/<int:hours>')
+def detection_graph_route(hours):
+    """Route to serve the detection graph for the specified time range."""
+    detection_log_path = app.config['detection_log_path']
+    image_base64 = generate_detection_graph(hours, detection_log_path)
+    if image_base64 is None:
+        return 'No detection data available for this time range.', 404
+    return f'<img src="data:image/png;base64,{image_base64}">'
