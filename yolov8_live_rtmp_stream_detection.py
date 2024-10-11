@@ -18,6 +18,7 @@ import time
 from datetime import datetime
 import pytz
 
+from collections import deque
 import pyttsx3
 import os
 from ultralytics import YOLO
@@ -31,6 +32,14 @@ import sys
 
 # Import web server functions
 from web_server import start_web_server, set_output_frame
+
+# Shared data structures
+detections_list = deque(maxlen=100)  # Store up to 100 latest detections on web UI
+logs_list = deque(maxlen=100)        # Store up to 100 latest logs won web UI
+
+# Locks for thread safety
+detections_lock = threading.Lock()
+logs_lock = threading.Lock()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -80,6 +89,18 @@ ENABLE_WEBSERVER = config.getboolean('webserver', 'enable_webserver', fallback=F
 WEBSERVER_HOST = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
 WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
 
+# List handler for webUI logging
+class ListHandler(logging.Handler):
+    def __init__(self, logs_list, logs_lock):
+        super().__init__()
+        self.logs_list = logs_list
+        self.logs_lock = logs_lock
+
+    def emit(self, record):
+        log_entry = self.format(record)
+        with self.logs_lock:
+            self.logs_list.append(log_entry)
+
 # Define the main logger
 main_logger = logging.getLogger('main')
 main_logger.setLevel(logging.INFO)
@@ -94,6 +115,12 @@ stream_handler.setLevel(logging.INFO)
 formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 stream_handler.setFormatter(formatter)
 main_logger.addHandler(stream_handler)
+
+# Add custom ListHandler to capture logs
+list_handler = ListHandler(logs_list, logs_lock)
+list_handler.setLevel(logging.WARNING)  # Capture WARNING and ERROR logs
+list_handler.setFormatter(formatter)
+main_logger.addHandler(list_handler)
 
 # Configure detection logger if enabled
 detection_logger = logging.getLogger('detection')
@@ -425,8 +452,20 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     detection_ongoing.set()
                     detection_count += 1
                     main_logger.info(f"Detections found: {detections}")
+
+                # **Assign timestamp here**
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
                 for detection in detections:
                     x1, y1, x2, y2, confidence, class_idx = detection
+                    detection_info = {
+                        'frame_count': total_frames,
+                        'timestamp': timestamp,
+                        'coordinates': (x1, y1, x2, y2),
+                        'confidence': confidence
+                    }
+                    with detections_lock:
+                        detections_list.appendleft(detection_info)  # Use appendleft to show recent detections first                    
                     if draw_rectangles:
                         x1, y1, x2, y2 = max(0, int(x1)), max(0, int(y1)), min(denoised_frame.shape[1], int(x2)), min(denoised_frame.shape[0], int(y2))
                         if not headless:
@@ -544,7 +583,8 @@ if __name__ == "__main__":
 
     if ENABLE_WEBSERVER:
         # Start the web server in a separate daemon thread
-        web_server_thread = threading.Thread(target=start_web_server, args=(WEBSERVER_HOST, WEBSERVER_PORT))
+        # web_server_thread = threading.Thread(target=start_web_server, args=(WEBSERVER_HOST, WEBSERVER_PORT))
+        web_server_thread = threading.Thread(target=start_web_server, args=(WEBSERVER_HOST, WEBSERVER_PORT, detections_list, logs_list, detections_lock, logs_lock))
         web_server_thread.daemon = True
         web_server_thread.start()
         main_logger.info(f"Web server started at http://{WEBSERVER_HOST}:{WEBSERVER_PORT}")

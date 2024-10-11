@@ -20,9 +20,13 @@ app = Flask(__name__)
 output_frame = None
 frame_lock = threading.Lock()
 
-def start_web_server(host='0.0.0.0', port=5000):
+def start_web_server(host='0.0.0.0', port=5000, detections_list=None, logs_list=None, detections_lock=None, logs_lock=None):
     """Starts the Flask web server."""
     logger.info(f"Starting web server at http://{host}:{port}")
+    app.config['detections_list'] = detections_list
+    app.config['logs_list'] = logs_list
+    app.config['detections_lock'] = detections_lock
+    app.config['logs_lock'] = logs_lock
     # Suppress Flask's default logging if necessary
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
@@ -68,14 +72,38 @@ def video_feed():
 @app.route('/')
 def index():
     """Homepage to display video streaming."""
+    with app.config['detections_lock']:
+        detections = list(app.config['detections_list'])
+    with app.config['logs_lock']:
+        logs = list(app.config['logs_list'])
     return render_template_string('''
         <html>
         <head>
             <title>Real-time Human Detection</title>
+            <meta http-equiv="refresh" content="5">
         </head>
         <body>
             <h1>Real-time Human Detection</h1>
             <img src="{{ url_for('video_feed') }}" width="100%">
+
+            <h2>Latest Detections</h2>
+            <ul>
+            {% for detection in detections %}
+                <li>
+                    Frame {{ detection.frame_count }}, 
+                    Timestamp {{ detection.timestamp }}, 
+                    Coordinates: {{ detection.coordinates }}, 
+                    Confidence: {{ detection.confidence|round(2) }}
+                </li>
+            {% endfor %}
+            </ul>
+
+            <h2>Backend Logs</h2>
+            <ul>
+            {% for log in logs %}
+                <li>{{ log }}</li>
+            {% endfor %}
+            </ul>
         </body>
         </html>
-    ''')
+    ''', detections=detections, logs=logs)
