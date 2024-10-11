@@ -58,6 +58,7 @@ WORKDIR /opt/opencv_build/opencv/build
 
 # Configure OpenCV with CUDA
 RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
+    -D CMAKE_CXX_STANDARD=14 \
     -D CMAKE_INSTALL_PREFIX=/usr/local \
     -D OPENCV_EXTRA_MODULES_PATH=/opt/opencv_build/opencv_contrib/modules \
     -D WITH_CUDA=ON \
