@@ -54,7 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python3 -m pip install --upgrade pip
 
 # Install Python dependencies
-RUN python3 -m pip install numpy
+RUN python3 -m pip install --no-cache-dir numpy
 
 # Define OpenCV version
 ENV OPENCV_VERSION=4.10.0
