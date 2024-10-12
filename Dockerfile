@@ -64,11 +64,13 @@ WORKDIR /opt/opencv_build
 
 # Download OpenCV and OpenCV_contrib
 RUN wget -O opencv.zip https://github.com/opencv/opencv/archive/${OPENCV_VERSION}.zip && \
-    wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/${OPENCV_VERSION}.zip && \
-    unzip opencv.zip && \
-    unzip opencv_contrib.zip && \
-    mv opencv-${OPENCV_VERSION} opencv && \
-    mv opencv_contrib-${OPENCV_VERSION} opencv_contrib
+RUN wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/${OPENCV_VERSION}.zip && \
+RUN unzip opencv.zip
+RUN unzip opencv_contrib.zip
+RUN rm opencv.zip
+RUN rm opencv_contrib.zip
+RUN mv opencv-${OPENCV_VERSION} opencv
+RUN mv opencv_contrib-${OPENCV_VERSION} opencv_contrib
 
 # Create build directory
 WORKDIR /opt/opencv_build/opencv/build
@@ -94,7 +96,10 @@ RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
     ..
 
 # Build OpenCV
-RUN make -j$(nproc) && make install && ldconfig
+RUN make -j$(nproc)
+RUN make install
+RUN rm -rf /opt/opencv_build
+RUN ldconfig
 
 RUN python3 -m pip install --upgrade pip
 
