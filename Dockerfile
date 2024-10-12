@@ -50,6 +50,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libespeak-ng1 \    
     && rm -rf /var/lib/apt/lists/*
 
+# apt-clean
+RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+
 # Upgrade pip for Python 3.12
 RUN python3 -m pip install --upgrade pip
 
@@ -64,13 +67,10 @@ WORKDIR /opt/opencv_build
 
 # Download OpenCV and OpenCV_contrib
 RUN wget -O opencv.zip https://github.com/opencv/opencv/archive/${OPENCV_VERSION}.zip && \
-RUN wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/${OPENCV_VERSION}.zip && \
-RUN unzip opencv.zip
-RUN unzip opencv_contrib.zip
-RUN rm opencv.zip
-RUN rm opencv_contrib.zip
-RUN mv opencv-${OPENCV_VERSION} opencv
-RUN mv opencv_contrib-${OPENCV_VERSION} opencv_contrib
+    wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/${OPENCV_VERSION}.zip && \
+    unzip opencv.zip && unzip opencv_contrib.zip && \
+    rm opencv.zip opencv_contrib.zip && \
+    mv opencv-${OPENCV_VERSION} opencv && mv opencv_contrib-${OPENCV_VERSION} opencv_contrib
 
 # Create build directory
 WORKDIR /opt/opencv_build/opencv/build
