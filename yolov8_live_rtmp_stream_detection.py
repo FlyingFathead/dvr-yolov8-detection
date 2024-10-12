@@ -43,14 +43,32 @@ detections_lock = threading.Lock()
 logs_lock = threading.Lock()
 
 # Load configuration from `config.ini` file with case-sensitive keys
-def load_config(config_path='config.ini'):
-    config = configparser.ConfigParser()
-    config.optionxform = str  # Override optionxform to make keys case-sensitive
-    config.read(config_path)
-    return config
+def load_config(config_path=None):
+    try:
+        if config_path is None:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            print(f"Script directory resolved to: {script_dir}", flush=True)
+            config_path = os.path.join(script_dir, 'config.ini')
+        
+        print(f"Attempting to load config from: {config_path}", flush=True)
+        config = configparser.ConfigParser()
+        # config.optionxform = str  # Make keys case-sensitive
+        read_files = config.read(config_path)
+        
+        if not read_files:
+            print(f"Warning: Config file {config_path} not found or is empty. Using default settings.", flush=True)
+        else:
+            print(f"Config file {config_path} loaded successfully.", flush=True)
+        
+        return config
+    except Exception as e:
+        print(f"Error loading config: {e}", flush=True)
+        raise
 
 # Load configuration
+print("Starting configuration loading...", flush=True)
 config = load_config()
+print("Configuration loading completed.", flush=True)
 
 # Assign configurations to variables
 HEADLESS = config.getboolean('detection', 'headless', fallback=False)
@@ -617,29 +635,32 @@ def sanitize_detection_data(detection):
 if __name__ == "__main__":
     log_cuda_info()  # Log CUDA information
     parser = argparse.ArgumentParser(description="YOLOv8 RTMP Stream Human Detection")
+
+    # Define mutually exclusive group for save_detections
+    save_group = parser.add_mutually_exclusive_group()
+    save_group.add_argument("--save_detections", action='store_true', help="Save images with detections")
+    save_group.add_argument("--no_save_detections", action='store_false', dest='save_detections', help="Do not save images with detections")
+
+    # Set default to None to indicate no override
+    parser.set_defaults(save_detections=None)
+
+    # Define other arguments without default values to allow config.ini to set them
     parser.add_argument("--headless", action='store_true', help="Run in headless mode without GUI display")
-    parser.add_argument("--stream_url", type=str, default=STREAM_URL, help="URL of the RTMP stream")
+    parser.add_argument("--stream_url", type=str, help="URL of the RTMP stream")
     parser.add_argument("--use_webcam", action='store_true', help="Use webcam for video input")
-    parser.add_argument("--webcam_index", type=int, default=WEBCAM_INDEX, help="Index number of the webcam to use")
-    parser.add_argument("--conf_threshold", type=float, default=DEFAULT_CONF_THRESHOLD, help="Confidence threshold for detections")
-    parser.add_argument("--model_variant", type=str, default=DEFAULT_MODEL_VARIANT, help="YOLOv8 model variant to use")
-    parser.add_argument("--draw_rectangles", action='store_true', help="Draw rectangles around detected objects")
-
-    # Update SAVE_DETECTIONS arguments
-    parser.add_argument("--save_detections", action='store_true', default=SAVE_DETECTIONS, help="Save images with detections")
-    parser.add_argument("--no_save_detections", action='store_false', default=SAVE_DETECTIONS, dest='save_detections', help="Do not save images with detections")
-
-    parser.add_argument("--image_format", type=str, default=IMAGE_FORMAT, help="Image format for saving detections (jpg or png)")
-    parser.add_argument("--save_dir", type=str, default=None, help="Directory to save detection images")  # Changed default to None
-    # Removed fallback_save_dir from arguments as it's handled via config.ini
-    parser.add_argument("--retry_delay", type=int, default=RETRY_DELAY, help="Delay between retries to connect to the stream")
-    parser.add_argument("--max_retries", type=int, default=MAX_RETRIES, help="Maximum number of retries to connect to the stream")
+    parser.add_argument("--webcam_index", type=int, help="Index number of the webcam to use")
+    parser.add_argument("--conf_threshold", type=float, help="Confidence threshold for detections")
+    parser.add_argument("--model_variant", type=str, help="YOLOv8 model variant to use")
+    parser.add_argument("--image_format", type=str, help="Image format for saving detections (jpg or png)")
+    parser.add_argument("--save_dir", type=str, help="Directory to save detection images")
+    parser.add_argument("--retry_delay", type=int, help="Delay between retries to connect to the stream")
+    parser.add_argument("--max_retries", type=int, help="Maximum number of retries to connect to the stream")
     parser.add_argument("--rescale_input", action='store_true', help="Rescale the input frames")
-    parser.add_argument("--target_height", type=int, default=TARGET_HEIGHT, help="Target height for rescaling the frames")
+    parser.add_argument("--target_height", type=int, help="Target height for rescaling the frames")
     parser.add_argument("--denoise", action='store_true', help="Toggle denoising on/off")
-    parser.add_argument("--process_fps", type=int, default=PROCESS_FPS, help="Frames per second for processing")
+    parser.add_argument("--process_fps", type=int, help="Frames per second for processing")
     parser.add_argument("--use_process_fps", action='store_true', help="Whether to use custom processing FPS")
-    parser.add_argument("--timeout", type=int, default=TIMEOUT, help="Timeout for the video stream in seconds")
+    parser.add_argument("--timeout", type=int, help="Timeout for the video stream in seconds")
     parser.add_argument("--enable_webserver", action='store_true', help="Enable the web server for streaming detections")
     parser.add_argument("--webserver_host", type=str, help="Host IP address for the web server")
     parser.add_argument("--webserver_port", type=int, help="Port number for the web server")
@@ -659,13 +680,55 @@ if __name__ == "__main__":
         HEADLESS = True
         main_logger.info("Running in headless mode -- no GUI. Set 'headless' AND 'enable_webserver' to 'false' if you want to run the windowed GUI version.")
 
-    # Only override config if the command-line argument is explicitly given
+    # Set SAVE_DETECTIONS based on args, with fallback to config
+    # After parsing arguments
     if args.save_detections is not None:
         SAVE_DETECTIONS = args.save_detections
+        main_logger.info(f"save_detections overridden by command-line argument: {SAVE_DETECTIONS}")
     else:
         SAVE_DETECTIONS = config.getboolean('detection', 'save_detections')
-    main_logger.info(f"Detection saving set to: {SAVE_DETECTIONS}")
+        main_logger.info(f"save_detections set from config.ini: {SAVE_DETECTIONS}")
 
+    # # Similarly, set DRAW_RECTANGLES based on args, with fallback to config
+    # if args.draw_rectangles is not None:
+    #     DRAW_RECTANGLES = args.draw_rectangles
+    # else:
+    DRAW_RECTANGLES = config.getboolean('detection', 'draw_rectangles')
+    main_logger.info(f"Draw rectangles set to: {DRAW_RECTANGLES}")
+
+    # Update other configurations based on arguments, only if provided
+    if args.stream_url:
+        STREAM_URL = args.stream_url
+    if args.use_webcam:
+        USE_WEBCAM = args.use_webcam
+    if args.webcam_index is not None:
+        WEBCAM_INDEX = args.webcam_index
+    if args.conf_threshold is not None:
+        DEFAULT_CONF_THRESHOLD = args.conf_threshold
+    if args.model_variant:
+        DEFAULT_MODEL_VARIANT = args.model_variant
+    if args.image_format:
+        IMAGE_FORMAT = args.image_format
+    if args.save_dir:
+        SAVE_DIR = args.save_dir
+    if args.retry_delay is not None:
+        RETRY_DELAY = args.retry_delay
+    if args.max_retries is not None:
+        MAX_RETRIES = args.max_retries
+    if args.rescale_input:
+        RESCALE_INPUT = args.rescale_input
+    if args.target_height is not None:
+        TARGET_HEIGHT = args.target_height
+    if args.denoise:
+        DENOISE = args.denoise
+    if args.process_fps is not None:
+        PROCESS_FPS = args.process_fps
+    if args.use_process_fps:
+        USE_PROCESS_FPS = args.use_process_fps
+    if args.timeout is not None:
+        TIMEOUT = args.timeout
+
+    # Initialize web server if enabled
     if ENABLE_WEBSERVER:
         # Start the web server in a separate daemon thread
         web_server_thread = threading.Thread(
@@ -695,23 +758,7 @@ if __name__ == "__main__":
         main_logger.error(f"Error initializing save directory: {e}")
         sys.exit(1)
 
-    # Update other configurations based on arguments
-    STREAM_URL = args.stream_url
-    USE_WEBCAM = args.use_webcam
-    WEBCAM_INDEX = args.webcam_index    
-    DRAW_RECTANGLES = args.draw_rectangles
-    SAVE_DETECTIONS = args.save_detections
-    IMAGE_FORMAT = args.image_format
-    RETRY_DELAY = args.retry_delay
-    MAX_RETRIES = args.max_retries
-    RESCALE_INPUT = args.rescale_input
-    TARGET_HEIGHT = args.target_height
-    DENOISE = args.denoise
-    PROCESS_FPS = args.process_fps
-    USE_PROCESS_FPS = args.use_process_fps
-    TIMEOUT = args.timeout
-    HEADLESS = args.headless
-
+    # Initialize queues and events
     frame_queue = Queue(maxsize=10)
     stop_event = Event()
     detection_ongoing = Event()
@@ -722,7 +769,7 @@ if __name__ == "__main__":
 
     # Initialize threads
     capture_thread = Thread(target=frame_capture_thread, args=(STREAM_URL, USE_WEBCAM, WEBCAM_INDEX, frame_queue, stop_event))
-    processing_thread = Thread(target=frame_processing_thread, args=(frame_queue, stop_event, args.conf_threshold, DRAW_RECTANGLES, DENOISE, PROCESS_FPS, USE_PROCESS_FPS, detection_ongoing, HEADLESS))
+    processing_thread = Thread(target=frame_processing_thread, args=(frame_queue, stop_event, DEFAULT_CONF_THRESHOLD, DRAW_RECTANGLES, DENOISE, PROCESS_FPS, USE_PROCESS_FPS, detection_ongoing, HEADLESS))
 
     try:
         capture_thread.start()
@@ -730,7 +777,7 @@ if __name__ == "__main__":
 
         capture_thread.join()
         processing_thread.join()
-    
+
     finally:
         # Ensure TTS thread is stopped
         tts_stop_event.set()
