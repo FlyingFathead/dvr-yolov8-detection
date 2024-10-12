@@ -5,7 +5,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.158
+version_number = 0.159
 
 import cv2
 import torch
@@ -367,15 +367,19 @@ def announce_detection():
 
 # Function to save detection image with date check
 def save_detection_image(frame, detection_count):
-    global SAVE_DIR
+    global SAVE_DIR    
+    main_logger.info(f"Current SAVE_DIR is: {SAVE_DIR}")
+    main_logger.info("Attempting to save detection image.")    
     try:
         # Update SAVE_DIR based on current date
         SAVE_DIR = get_current_save_dir()
         
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")  # Format timestamp as YYYYMMDD-HHMMSS
         filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}.{IMAGE_FORMAT}")  # Ensure SAVE_DIR already includes date subdirs
-        cv2.imwrite(filename, frame)
-        main_logger.info(f"Saved detection image: {filename}")
+        if not cv2.imwrite(filename, frame):
+            main_logger.error(f"Failed to save detection image: {filename}")
+        else:
+            main_logger.info(f"Saved detection image: {filename}")
     except Exception as e:
         main_logger.error(f"Error saving detection image: {e}")
 
@@ -480,11 +484,20 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
             detections = results[0].boxes.data.cpu().numpy()
 
             if detections.size > 0:
+                main_logger.info(f"SAVE_DETECTIONS is set to: {SAVE_DETECTIONS}")
                 if not detecting_human:
                     detecting_human = True
                     detection_ongoing.set()
                     detection_count += 1
                     main_logger.info(f"Detections found: {detections}")
+
+                # Save image for every detection frame
+                if SAVE_DETECTIONS:
+                    main_logger.info("Saving detection image.")
+                    try:
+                        save_detection_image(denoised_frame, detection_count)
+                    except Exception as e:
+                        main_logger.error(f"Error during save_detection_image: {e}")
 
                 # **Assign timestamp here**
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -611,7 +624,11 @@ if __name__ == "__main__":
     parser.add_argument("--conf_threshold", type=float, default=DEFAULT_CONF_THRESHOLD, help="Confidence threshold for detections")
     parser.add_argument("--model_variant", type=str, default=DEFAULT_MODEL_VARIANT, help="YOLOv8 model variant to use")
     parser.add_argument("--draw_rectangles", action='store_true', help="Draw rectangles around detected objects")
-    parser.add_argument("--save_detections", action='store_true', help="Save images with detections")
+
+    # Update SAVE_DETECTIONS arguments
+    parser.add_argument("--save_detections", action='store_true', default=SAVE_DETECTIONS, help="Save images with detections")
+    parser.add_argument("--no_save_detections", action='store_false', default=SAVE_DETECTIONS, dest='save_detections', help="Do not save images with detections")
+
     parser.add_argument("--image_format", type=str, default=IMAGE_FORMAT, help="Image format for saving detections (jpg or png)")
     parser.add_argument("--save_dir", type=str, default=None, help="Directory to save detection images")  # Changed default to None
     # Removed fallback_save_dir from arguments as it's handled via config.ini
@@ -641,6 +658,13 @@ if __name__ == "__main__":
     if args.headless or ENABLE_WEBSERVER:
         HEADLESS = True
         main_logger.info("Running in headless mode -- no GUI. Set 'headless' AND 'enable_webserver' to 'false' if you want to run the windowed GUI version.")
+
+    # Only override config if the command-line argument is explicitly given
+    if args.save_detections is not None:
+        SAVE_DETECTIONS = args.save_detections
+    else:
+        SAVE_DETECTIONS = config.getboolean('detection', 'save_detections')
+    main_logger.info(f"Detection saving set to: {SAVE_DETECTIONS}")
 
     if ENABLE_WEBSERVER:
         # Start the web server in a separate daemon thread
