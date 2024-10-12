@@ -12,20 +12,19 @@ ENV LANG=C.UTF-8
 # Get `wget` first
 RUN apt-get update && apt-get install -y --no-install-recommends wget
 
-# Add NVIDIA repo key and set up repository for CUDA 12.4
+# Add NVIDIA’s repo key and set up the repository for the latest CUDA versions
 RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb && \
     dpkg -i cuda-keyring_1.0-1_all.deb && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-        nvidia-cuda-dev=12.4.* \
-        nvidia-cuda-gdb=12.4.* \
+        libnvidia-ml-dev \
+        gcc-10 g++-10 \
+        build-essential \
         libcudnn9-cuda-12=9.1.* \
         libcudnn9-dev-cuda-12=9.1.* \
         cuda-toolkit-12-4=12.4.* \
         libcublas-12-4=12.4.5.* \
         libcublas-dev-12-4=12.4.5.* \
-        gcc-10 g++-10 \
-        build-essential \
         cmake \
         git \
         wget \
