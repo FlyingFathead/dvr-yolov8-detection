@@ -1,6 +1,7 @@
 # Use NVIDIA CUDA base image with Ubuntu 22.04
 # FROM nvidia/cuda:12.4.0-base-ubuntu22.04
-FROM nvidia/cuda:12.4.5-runtime-ubuntu22.04
+# FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
+FROM nvidia/cuda:12.6.1-runtime-ubuntu22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -18,7 +19,6 @@ RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libcudnn8 libcudnn8-dev \
     nvidia-cuda-dev \
     nvidia-cuda-gdb \
     gcc-10 g++-10 \
