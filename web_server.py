@@ -23,6 +23,10 @@ logger.setLevel(logging.INFO)
 logger.propagate = False  # Add this line
 
 app = Flask(__name__)
+# Flask proxy fix
+# from werkzeug.middleware.proxy_fix import ProxyFix
+# app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
+# app.config['APPLICATION_ROOT'] = '/'
 
 # Global variables to hold the output frame and a lock for thread safety
 output_frame = None
@@ -223,6 +227,12 @@ def aggregation_thread_function(cooldown=30, bold_threshold=10):
                 # Reset the aggregation to allow new aggregations
                 current_aggregation = None
                 last_detection_time = None
+
+@app.before_request
+def log_request_info():
+    logging.info(f"Request URL: {request.url}")
+    logging.info(f"Request path: {request.path}")
+    logging.info(f"Request headers: {request.headers}")
 
 @app.route('/api/current_time')
 def get_current_time():
