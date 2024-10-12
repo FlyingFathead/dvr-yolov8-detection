@@ -12,43 +12,81 @@ ENV LANG=C.UTF-8
 # Get `wget` first
 RUN apt-get update && apt-get install -y --no-install-recommends wget
 
-# Then, run the keyring in
+# Add NVIDIA repo key and set up repository for CUDA 12.4
 RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb && \
     dpkg -i cuda-keyring_1.0-1_all.deb && \
-    apt-get update
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    nvidia-cuda-dev \
-    nvidia-cuda-gdb \
-    gcc-10 g++-10 \
-    build-essential \
-    libcudnn9-cuda-12 \
-    libcudnn9-dev-cuda-12 \
-    cuda-toolkit-12-4 \
-    cmake \
-    git \
-    wget \
-    unzip \
-    pkg-config \
-    libjpeg-dev \
-    libpng-dev \
-    libtiff-dev \
-    libavcodec-dev \
-    libavformat-dev \
-    libswscale-dev \
-    libv4l-dev \
-    libxvidcore-dev \
-    libx264-dev \
-    libgtk-3-dev \
-    libatlas-base-dev \
-    gfortran \
-    libgl1 \
-    python3-dev \    
-    python3-pip \
-    espeak-ng \
-    libespeak-ng1 \    
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        nvidia-cuda-dev=12.4.* \
+        nvidia-cuda-gdb=12.4.* \
+        libcudnn9-cuda-12=9.1.* \
+        libcudnn9-dev-cuda-12=9.1.* \
+        cuda-toolkit-12-4=12.4.* \
+        libcublas-12-4=12.4.5.* \
+        libcublas-dev-12-4=12.4.5.* \
+        gcc-10 g++-10 \
+        build-essential \
+        cmake \
+        git \
+        wget \
+        unzip \
+        pkg-config \
+        libjpeg-dev \
+        libpng-dev \
+        libtiff-dev \
+        libavcodec-dev \
+        libavformat-dev \
+        libswscale-dev \
+        libv4l-dev \
+        libxvidcore-dev \
+        libx264-dev \
+        libgtk-3-dev \
+        libatlas-base-dev \
+        gfortran \
+        libgl1 \
+        python3-dev \
+        python3-pip \
+        espeak-ng \
+        libespeak-ng1 \
     && rm -rf /var/lib/apt/lists/*
+
+# # Then, run the keyring in
+# RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb && \
+#     dpkg -i cuda-keyring_1.0-1_all.deb && \
+#     apt-get update
+
+# # Install system dependencies
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     nvidia-cuda-dev \
+#     nvidia-cuda-gdb \
+#     gcc-10 g++-10 \
+#     build-essential \
+#     libcudnn9-cuda-12 \
+#     libcudnn9-dev-cuda-12 \
+#     cuda-toolkit-12-4 \
+#     cmake \
+#     git \
+#     wget \
+#     unzip \
+#     pkg-config \
+#     libjpeg-dev \
+#     libpng-dev \
+#     libtiff-dev \
+#     libavcodec-dev \
+#     libavformat-dev \
+#     libswscale-dev \
+#     libv4l-dev \
+#     libxvidcore-dev \
+#     libx264-dev \
+#     libgtk-3-dev \
+#     libatlas-base-dev \
+#     gfortran \
+#     libgl1 \
+#     python3-dev \    
+#     python3-pip \
+#     espeak-ng \
+#     libespeak-ng1 \    
+#     && rm -rf /var/lib/apt/lists/*
 
 # apt-clean
 RUN apt-get clean && rm -rf /var/lib/apt/lists/*
