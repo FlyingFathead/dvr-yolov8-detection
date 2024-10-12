@@ -1,5 +1,6 @@
 # Use NVIDIA CUDA base image with Ubuntu 22.04
-FROM nvidia/cuda:12.4.0-base-ubuntu22.04
+# FROM nvidia/cuda:12.4.0-base-ubuntu22.04
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -89,6 +90,7 @@ RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
     -D WITH_QT=ON \
     -D WITH_OPENGL=ON \
     -D BUILD_opencv_python3=ON \
+    -D BUILD_TESTS=OFF \      
     ..
 
 # Build OpenCV
@@ -97,7 +99,7 @@ RUN make -j$(nproc) && make install && ldconfig
 RUN python3 -m pip install --upgrade pip
 
 # Install YOLOv8 and other Python dependencies
-RUN pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 # Verify OpenCV installation and CUDA support in a single RUN command
 RUN echo "==============================================================" && \
@@ -115,7 +117,7 @@ WORKDIR /app
 COPY . /app
 
 # install repository requirements
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Expose any necessary ports (if applicable)
 # Example: EXPOSE 8000
