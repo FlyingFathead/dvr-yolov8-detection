@@ -125,7 +125,7 @@ if DETECTION_AREA_MARGIN < 0:
 # Handle Unlimited Queue Size
 if FRAME_QUEUE_SIZE <= 0:
     print("Frame queue size set to unlimited.")
-    FRAME_QUEUE_SIZE = None  # Queue with no maxsize
+    FRAME_QUEUE_SIZE = 0  # Queue with unlimited size
 else:
     print(f"Frame queue size set to: {FRAME_QUEUE_SIZE}")
 
@@ -780,7 +780,7 @@ if __name__ == "__main__":
         FRAME_QUEUE_SIZE = args.frame_queue_size
         if FRAME_QUEUE_SIZE <= 0:
             main_logger.info("Frame queue size set to unlimited via command-line argument.")
-            FRAME_QUEUE_SIZE = None
+            FRAME_QUEUE_SIZE = 0  # Queue with unlimited size
         else:
             main_logger.info(f"Frame queue size set to {FRAME_QUEUE_SIZE} via command-line argument.")
 
