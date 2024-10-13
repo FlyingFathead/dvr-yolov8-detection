@@ -6,7 +6,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
 # Install build dependencies and CUDA libraries
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install --allow-change-held-packages -y --no-install-recommends \
     wget \
     build-essential \
     gcc-10 g++-10 \
@@ -83,7 +83,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y --allow-change-held-packages --no-install-recommends \
+RUN apt-get update && apt-get install --allow-change-held-packages -y --no-install-recommends \
     libnvidia-ml-dev \
     libcudnn9-cuda-12 \
     libcudnn9-dev-cuda-12 \
@@ -97,7 +97,7 @@ RUN apt-get update && apt-get install -y --allow-change-held-packages --no-insta
     && rm -rf /var/lib/apt/lists/*
 
 # Optional: List held packages for debugging
-RUN apt-mark showhold
+# RUN apt-mark showhold
 
 # Upgrade pip and install runtime Python dependencies
 RUN python3 -m pip install --upgrade pip
