@@ -5,6 +5,7 @@
 # Web server module for real-time YOLOv8 detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+import os
 from collections import deque
 from datetime import datetime
 import threading
@@ -48,6 +49,27 @@ def load_config(config_file='config.ini'):
 # Load configurations
 config = load_config()
 
+# Extract logging directory and files from the config
+log_directory = config.get('logging', 'log_directory', fallback='./logs')
+if not os.path.exists(log_directory):
+    os.makedirs(log_directory)  # Ensure log directory exists
+
+log_file = os.path.join(log_directory, config.get('logging', 'log_file', fallback='logging.log'))
+detection_log_file = os.path.join(log_directory, config.get('logging', 'detection_log_file', fallback='detections.log'))
+access_log_file = os.path.join(log_directory, config.get('logging', 'access_log_file', fallback='access.log'))
+
+# Configure the access logger
+access_log_handler = logging.FileHandler(access_log_file)
+access_log_formatter = logging.Formatter('%(asctime)s - %(message)s')
+access_log_handler.setFormatter(access_log_formatter)
+access_logger = logging.getLogger('access_logger')
+access_logger.addHandler(access_log_handler)
+access_logger.setLevel(logging.INFO)
+
+# Dictionary to store timestamps of recent requests for each IP
+last_logged_time = {}
+log_interval = 10  # Interval in seconds to aggregate logs for frequent requests
+
 # Extract configurations with fallbacks
 ENABLE_WEBSERVER = config.getboolean('webserver', 'enable_webserver', fallback=True)
 WEBSERVER_HOST = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
@@ -55,17 +77,39 @@ WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
 WEBSERVER_MAX_FPS = config.getint('webserver', 'webserver_max_fps', fallback=10)
 WEBUI_COOLDOWN_AGGREGATION = config.getint('webui', 'webui_cooldown_aggregation', fallback=30)
 WEBUI_BOLD_THRESHOLD = config.getint('webui', 'webui_bold_threshold', fallback=10)
+# Read check_interval from config.ini with a fallback to 10
+interval_checks = config.getboolean('webserver', 'interval_checks', fallback=True)
+check_interval = config.getint('webserver', 'check_interval', fallback=10)
+
+# // client tracking
+# Keep track of connected clients
+connected_clients = {}
 
 # Configure logging for the web server
 logger = logging.getLogger('web_server')
 logger.setLevel(logging.INFO)
 
-# # Console handler
-# console_handler = logging.StreamHandler()
-# console_handler.setLevel(logging.INFO)
-# formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-# console_handler.setFormatter(formatter)
-# logger.addHandler(console_handler)
+# Initialize the lock for connected_clients
+connected_clients_lock = threading.Lock()
+
+# Periodically check and log active client connections.
+def log_active_connections():
+    """Periodically log active client connections."""
+    while True:
+        time.sleep(check_interval)
+        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with connected_clients_lock:
+            if connected_clients:
+                logger.info(f"Active connections at {current_time}: {connected_clients}")
+            else:
+                logger.info(f"No active web UI connections at {current_time}, check interval is {check_interval} seconds.")
+
+# Conditionally start the background thread for logging active connections
+if interval_checks:
+    threading.Thread(target=log_active_connections, daemon=True).start()
+    logger.info("Active connections logging is enabled.")
+else:
+    logger.info("Active connections logging is disabled.")
 
 # Log the active configurations on startup
 logger.info("======================================================")
@@ -74,6 +118,7 @@ logger.info(f"Enable Web Server: {ENABLE_WEBSERVER}")
 logger.info(f"Web Server Host: {WEBSERVER_HOST}")
 logger.info(f"Web Server Port: {WEBSERVER_PORT}")
 logger.info(f"Web Server Max FPS: {WEBSERVER_MAX_FPS}")
+logger.info(f"Check Interval: {check_interval} seconds")
 logger.info(f"Web UI Cooldown Aggregation: {WEBUI_COOLDOWN_AGGREGATION} seconds")
 logger.info(f"Web UI Bold Threshold: {WEBUI_BOLD_THRESHOLD}")
 logger.info("======================================================")
@@ -230,9 +275,35 @@ def aggregation_thread_function(cooldown=30, bold_threshold=10):
 
 @app.before_request
 def log_request_info():
-    logging.info(f"Request URL: {request.url}")
+    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+    current_time = time.time()
+
+    # Log request details into access log
+    # access_logger.info(f"Client IP: {client_ip} - Request URL: {request.url} - Method: {request.method} - User Agent: {request.user_agent}")
+    
+    # List of endpoints to ignore logging (e.g., video feed spam)
+    # excluded_routes = ['/video_feed', '/static/', '/favicon.ico']
+    excluded_routes = ""
+    
+    # Optional: Add this if you need more detailed logs in the main log
+    logging.info("⚠️ User connected to the webUI:")
     logging.info(f"Request path: {request.path}")
     logging.info(f"Request headers: {request.headers}")
+
+    # Track when clients hit an endpoint
+    if request.path not in excluded_routes:
+        with connected_clients_lock:
+            connected_clients[client_ip] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Log requests for non-excluded routes immediately
+    if request.path not in excluded_routes:
+        access_logger.info(f"Client IP: {client_ip} - Request URL: {request.url} - Request Path: {request.path} - Request Headers: {request.headers} - Method: {request.method} - User Agent: {request.user_agent}")
+    else:
+        # Check if enough time has passed to log this IP again
+        last_time = last_logged_time.get(client_ip, 0)
+        if current_time - last_time > log_interval:
+            access_logger.info(f"Aggregated log - Client IP: {client_ip} - Request Path: {request.path} - Request Headers: {request.headers} - Request URL: {request.url} - Method: {request.method} - User Agent: {request.user_agent}")
+            last_logged_time[client_ip] = current_time
 
 @app.route('/api/current_time')
 def get_current_time():

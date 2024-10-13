@@ -266,6 +266,8 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.160** (Oct-13-2024) WebUI access logging added
+  - Can be enabled/disabled and defined in `config.ini`
 - **v0.159** (Oct-12-2024) Fixes to the detection saving logic
 - **v0.158** (Oct-11-2024) **Even more webUI updates**
   - Human detections get aggregated in the webUI within a cooldown period

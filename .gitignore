@@ -8,6 +8,8 @@
 __pycache__/
 
 # Ignore logs and temporary files
+access.log
+detections.log
 *.log
 *.tmp
 
