@@ -570,7 +570,41 @@ def index():
             color: white;
             font-size: 30px;
             cursor: pointer;
-        }                                  
+        }
+    /* Modal button styles */
+    #prev-button, #next-button, #swap-button {
+        position: absolute;
+        padding: 10px 20px;
+        font-size: 16px;
+        cursor: pointer;
+        background-color: rgba(255, 255, 255, 0.8);
+        border: none;
+        border-radius: 5px;
+    }
+    #prev-button {
+        left: 20px;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+    #next-button {
+        right: 20px;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+    #swap-button {
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+    /* Modal image count */
+    #image-count {
+        position: absolute;
+        bottom: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: white;
+        font-size: 16px;
+    }                                  
     </style>
 </head>
 <body>
@@ -595,22 +629,22 @@ def index():
     </ul>
 
     <!-- Modal Structure -->
-    <div id="image-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; 
-        background-color:rgba(0,0,0,0.8); z-index:1000; align-items:center; justify-content:center;">
-        <span style="position:absolute; top:10px; right:20px; color:white; font-size:30px; cursor:pointer;" onclick="closeModal()">&times;</span>
-        <img id="modal-image" src="" style="max-width:90%; max-height:90%;">
-        <div id="image-count" style="position:absolute; bottom:60px; left:50%; transform:translateX(-50%); color:white; font-size:16px;"></div>                                  
-        <button id="swap-button" style="position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
-            padding:10px 20px; font-size:16px; cursor:pointer;">Swap Image</button>
+    <div id="image-modal">
+        <span onclick="closeModal()">&times;</span>
+        <img id="modal-image" src="">
+        <div id="image-count"></div>
+        <button id="prev-button">&#8249;</button>
+        <button id="next-button">&#8250;</button>
+        <button id="swap-button">Swap Image Type</button>
     </div>
-                                  
+
     <h2>Backend Logs</h2>
     <ul id="logs-list">
         {% for log in logs %}
             <li>{{ log }}</li>
         {% endfor %}
     </ul>
-                  
+
     <h2>Detection Graphs</h2>
     <form id="graph-form" action="/" method="get">
         <label for="hours">Select Time Range:</label>
@@ -637,62 +671,87 @@ def index():
         </div>
     {% endif %}
 
-    <script>                                  
-        function showImages(imageFilenames) {
-            let currentIndex = 0;
-            let showFullFrame = true;
-            const modal = document.getElementById('image-modal');
-            const modalImage = document.getElementById('modal-image');
-            const swapButton = document.getElementById('swap-button');
-            const imageCountElement = document.getElementById('image-count');
+    <script>
+        // Global variables
+        let modalOpen = false;
+        let currentIndex = 0;
+        let imageFilenames = [];
+        let showFullFrame = true;
 
-            function showImage(index) {
-                const imageInfo = imageFilenames[index];
-                let filename = imageInfo.full_frame;
+        const modal = document.getElementById('image-modal');
+        const modalImage = document.getElementById('modal-image');
+        const swapButton = document.getElementById('swap-button');
+        const imageCountElement = document.getElementById('image-count');
+        const prevButton = document.getElementById('prev-button');
+        const nextButton = document.getElementById('next-button');
 
-                if (!showFullFrame && imageInfo.detection_area) {
-                    filename = imageInfo.detection_area;
-                } else if (!showFullFrame && !imageInfo.detection_area) {
-                    filename = imageInfo.full_frame;
-                }
+        function showImage(index) {
+            const imageInfo = imageFilenames[index];
+            let filename = imageInfo.full_frame;
 
-                modalImage.src = '/detections/' + encodeURIComponent(filename);
-                imageCountElement.textContent = `Image ${index + 1} of ${imageFilenames.length}`;
+            if (!showFullFrame && imageInfo.detection_area) {
+                filename = imageInfo.detection_area;
+            } else if (!showFullFrame && !imageInfo.detection_area) {
+                filename = imageInfo.full_frame;
             }
+
+            modalImage.src = '/detections/' + encodeURIComponent(filename);
+            imageCountElement.textContent = `Image ${index + 1} of ${imageFilenames.length}`;
+        }
+
+        function showImages(images) {
+            imageFilenames = images;
+            currentIndex = 0;
+            showFullFrame = true;
 
             modal.style.display = 'flex';
             showImage(currentIndex);
-
-            // Handle swap button click
-            swapButton.onclick = function() {
-                showFullFrame = !showFullFrame;
-                showImage(currentIndex);
-            };
-
-            // Navigate images with arrow keys
-            document.onkeydown = function(event) {
-                if (event.keyCode == 37) { // Left arrow
-                    if (currentIndex > 0) {
-                        currentIndex--;
-                        showImage(currentIndex);
-                    }
-                } else if (event.keyCode == 39) { // Right arrow
-                    if (currentIndex < imageFilenames.length - 1) {
-                        currentIndex++;
-                        showImage(currentIndex);
-                    }
-                } else if (event.keyCode == 27) { // Escape key
-                    closeModal();
-                }
-            }
+            modalOpen = true;
         }
+
+        swapButton.onclick = function() {
+            showFullFrame = !showFullFrame;
+            showImage(currentIndex);
+        };
+
+        prevButton.onclick = function() {
+            if (currentIndex > 0) {
+                currentIndex--;
+                showImage(currentIndex);
+            }
+        };
+
+        nextButton.onclick = function() {
+            if (currentIndex < imageFilenames.length - 1) {
+                currentIndex++;
+                showImage(currentIndex);
+            }
+        };
 
         function closeModal() {
-            const modal = document.getElementById('image-modal');
             modal.style.display = 'none';
-            document.onkeydown = null;
+            modalOpen = false;
         }
 
+        // Attach the keydown event listener once
+        document.addEventListener('keydown', function(event) {
+            if (!modalOpen) {
+                return;
+            }
+            if (event.keyCode === 37) { // Left arrow
+                if (currentIndex > 0) {
+                    currentIndex--;
+                    showImage(currentIndex);
+                }
+            } else if (event.keyCode === 39) { // Right arrow
+                if (currentIndex < imageFilenames.length - 1) {
+                    currentIndex++;
+                    showImage(currentIndex);
+                }
+            } else if (event.keyCode === 27) { // Escape key
+                closeModal();
+            }
+        });
 
         // Function to fetch and update detections
         function fetchDetections() {
@@ -757,7 +816,6 @@ def index():
         setInterval(() => {
             fetchDetections();
             fetchLogs();
-            // fetchCurrentTime(); // Removed from here
         }, 5000); // 5000 milliseconds = 5 seconds
 
         // Also fetch current time every second for real-time update

@@ -267,7 +267,8 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 
 ## Changelog
 - **v0.1605** Overall compatibility & bug fixes
-  - Detection image carousel beta
+  - Detection image carousel beta over webUI
+  - If detection saving is enabled, images can be viewed from webUI
 - **v0.1604** Frame queue sizes now configurable
   - Helps in I/O performance issues when saving detections
   - `config.ini` => `[performance]` => `frame_queue_size`
