@@ -4,7 +4,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.1603
+version_number = 0.1604
 
 import cv2
 import torch
@@ -90,6 +90,8 @@ SAVE_FULL_FRAMES = config.getboolean('detection', 'save_full_frames', fallback=T
 FULL_FRAME_IMAGE_FORMAT = config.get('detection', 'full_frame_image_format', fallback='jpg')
 SAVE_DETECTION_AREAS = config.getboolean('detection', 'save_detection_areas', fallback=False)
 DETECTION_AREA_IMAGE_FORMAT = config.get('detection', 'detection_area_image_format', fallback='jpg')
+DETECTION_AREA_MARGIN = config.getint('detection', 'detection_area_margin', fallback=0)
+FRAME_QUEUE_SIZE = config.getint('performance', 'frame_queue_size', fallback=10)
 USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir')
 ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var')
 DEFAULT_SAVE_DIR = config.get('detection', 'default_save_dir')
@@ -114,6 +116,18 @@ CREATE_DATE_SUBDIRS = config.getboolean('detection', 'create_date_subdirs', fall
 ENABLE_WEBSERVER = config.getboolean('webserver', 'enable_webserver', fallback=False)
 WEBSERVER_HOST = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
 WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
+
+# Checking variables before taking off...
+if DETECTION_AREA_MARGIN < 0:
+    print("DETECTION_AREA_MARGIN is negative. Setting it to 0.")
+    DETECTION_AREA_MARGIN = 0
+
+# Handle Unlimited Queue Size
+if FRAME_QUEUE_SIZE <= 0:
+    print("Frame queue size set to unlimited.")
+    FRAME_QUEUE_SIZE = None  # Queue with no maxsize
+else:
+    print(f"Frame queue size set to: {FRAME_QUEUE_SIZE}")
 
 # List handler for webUI logging
 class ListHandler(logging.Handler):
@@ -552,12 +566,16 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
 
                     # Queue detection area image for saving
                     if SAVE_DETECTION_AREAS:
-                        main_logger.info("Saving detection area image.")                    
-                        x1_cropped = max(0, int(x1))
-                        y1_cropped = max(0, int(y1))
-                        x2_cropped = min(denoised_frame.shape[1], int(x2))
-                        y2_cropped = min(denoised_frame.shape[0], int(y2))
-                        detection_area = denoised_frame[y1_cropped:y2_cropped, x1_cropped:x2_cropped]
+                        main_logger.info("Saving detection area image with margin.")
+                        main_logger.info(f"Applying margin of {DETECTION_AREA_MARGIN} pixels to detection area.")
+
+                        # Apply margin
+                        x1_margined = max(0, int(x1) - DETECTION_AREA_MARGIN)
+                        y1_margined = max(0, int(y1) - DETECTION_AREA_MARGIN)
+                        x2_margined = min(denoised_frame.shape[1], int(x2) + DETECTION_AREA_MARGIN)
+                        y2_margined = min(denoised_frame.shape[0], int(y2) + DETECTION_AREA_MARGIN)
+
+                        detection_area = denoised_frame[y1_margined:y2_margined, x1_margined:x2_margined]
                         image_save_queue.put((detection_area.copy(), detection_count, 'detection_area'))
 
                     # for webui; record detection timestamp
@@ -718,6 +736,8 @@ if __name__ == "__main__":
     parser.add_argument("--no_save_detection_areas", action='store_false', dest='save_detection_areas', default=None, help="Do not save detection area images")
     parser.add_argument("--full_frame_image_format", type=str, help="Image format for full-frame images (jpg or png)")
     parser.add_argument("--detection_area_image_format", type=str, help="Image format for detection area images (jpg or png)")
+    parser.add_argument("--detection_area_margin", type=int, help="Margin in pixels to add around the detection area when saving images")
+    parser.add_argument("--frame_queue_size", type=int, help="Size of the frame queue. Set to 0 for unlimited size.")
 
     # Define other arguments without default values to allow config.ini to set them
     parser.add_argument("--headless", action='store_true', help="Run in headless mode without GUI display")
@@ -753,6 +773,16 @@ if __name__ == "__main__":
         FULL_FRAME_IMAGE_FORMAT = args.full_frame_image_format
     if args.detection_area_image_format:
         DETECTION_AREA_IMAGE_FORMAT = args.detection_area_image_format
+    if args.detection_area_margin is not None:
+        DETECTION_AREA_MARGIN = args.detection_area_margin
+    main_logger.info(f"DETECTION_AREA_MARGIN is set to: {DETECTION_AREA_MARGIN}")
+    if args.frame_queue_size is not None:
+        FRAME_QUEUE_SIZE = args.frame_queue_size
+        if FRAME_QUEUE_SIZE <= 0:
+            main_logger.info("Frame queue size set to unlimited via command-line argument.")
+            FRAME_QUEUE_SIZE = None
+        else:
+            main_logger.info(f"Frame queue size set to {FRAME_QUEUE_SIZE} via command-line argument.")
 
     # Override configurations based on command-line arguments
     if args.enable_webserver:
@@ -846,7 +876,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Initialize queues and events
-    frame_queue = Queue(maxsize=10)
+    frame_queue = Queue(maxsize=FRAME_QUEUE_SIZE)
     stop_event = Event()
     detection_ongoing = Event()
 

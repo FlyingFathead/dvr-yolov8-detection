@@ -266,6 +266,9 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1604** Frame queue sizes now configurable
+  - Helps in I/O performance issues when saving detections
+  - `config.ini` => `[performance]` => `frame_queue_size`
 - **v0.1603** New configuration for saving
   - Choose to save the detection area, the whole frame, or both.
   - _(see `config.ini` => `save_full_frames` and `save_detection_areas`)_
