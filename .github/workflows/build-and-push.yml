@@ -34,7 +34,11 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # Step 4: Cache Docker layers
+      # Step 4: Prune Docker system to free up space
+      - name: Prune Docker system
+        run: docker system prune -af
+
+      # Step 5: Cache Docker layers
       - name: Cache Docker layers
         uses: actions/cache@v3
         with:
@@ -43,7 +47,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-buildx-
 
-      # Step 5: Build and push Docker image
+      # Step 6: Build and push Docker image
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -56,17 +60,15 @@ jobs:
           cache-to: type=local,dest=/tmp/.buildx-cache-new
           build-args: |
             OPENCV_VERSION=4.10.0
-          # Optional: Reduce verbosity to save space
-          # build-args: --progress=plain
 
-      # Step 6: Update cache
+      # Step 7: Update cache
       - name: Update cache
         if: success()
         run: |
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
-      # Step 7: Check disk usage (Optional for debugging)
+      # Step 8: Check disk usage (Optional for debugging)
       - name: Check disk usage
         run: df -h
 

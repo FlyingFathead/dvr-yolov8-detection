@@ -1,5 +1,6 @@
 # Stage 1: Build OpenCV with CUDA
 FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
+# FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS base
 
 # Set environment variables to minimize interactive prompts and set locale
 ENV DEBIAN_FRONTEND=noninteractive
@@ -66,7 +67,7 @@ RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
     -D BUILD_EXAMPLES=OFF \
     -D WITH_GSTREAMER=ON \
     -D WITH_LIBV4L=ON \
-    -D WITH_QT=ON \
+    -D WITH_QT=OFF \  # Disable QT to save space
     -D WITH_OPENGL=ON \
     -D BUILD_opencv_python3=ON \
     -D BUILD_TESTS=OFF \
