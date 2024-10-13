@@ -66,7 +66,8 @@ RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
     -D BUILD_EXAMPLES=OFF \
     -D WITH_GSTREAMER=ON \
     -D WITH_LIBV4L=ON \
-    -D WITH_QT=OFF \  # Disable QT to save space
+    # Disable QT to save space
+    -D WITH_QT=OFF \
     -D WITH_OPENGL=ON \
     -D BUILD_opencv_python3=ON \
     -D BUILD_TESTS=OFF \
