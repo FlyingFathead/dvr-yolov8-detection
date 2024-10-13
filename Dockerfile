@@ -1,7 +1,7 @@
 # Stage 1: Build OpenCV with CUDA
 FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
 
-# Set environment variables
+# Set environment variables to minimize interactive prompts and set locale
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
@@ -73,12 +73,40 @@ RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
     ..
 
 # Build and install OpenCV
-RUN make -j$(nproc) && make install && ldconfig && make clean && rm -rf /opt/opencv_build
+RUN make -j$(nproc) && make install && ldconfig && make clean && \
+    rm -rf /opt/opencv_build/opencv && rm -rf /opt/opencv_build/opencv_contrib && \
+    apt-get purge -y --auto-remove \
+    wget \
+    build-essential \
+    gcc-10 \
+    g++-10 \
+    cmake \
+    git \
+    unzip \
+    pkg-config \
+    libjpeg-dev \
+    libpng-dev \
+    libtiff-dev \
+    libavcodec-dev \
+    libavformat-dev \
+    libswscale-dev \
+    libv4l-dev \
+    libxvidcore-dev \
+    libx264-dev \
+    libgtk-3-dev \
+    libatlas-base-dev \
+    gfortran \
+    libgl1 \
+    python3-dev \
+    python3-pip \
+    espeak-ng \
+    libespeak-ng1 \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Stage 2: Create the final image
 FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
 
-# Set environment variables
+# Set environment variables to minimize interactive prompts and set locale
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
@@ -95,9 +123,6 @@ RUN apt-get update && apt-get install --allow-change-held-packages -y --no-insta
     espeak-ng \
     libespeak-ng1 \
     && rm -rf /var/lib/apt/lists/*
-
-# Optional: List held packages for debugging
-# RUN apt-mark showhold
 
 # Upgrade pip and install runtime Python dependencies
 RUN python3 -m pip install --upgrade pip
@@ -123,6 +148,7 @@ RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://
 
 # Define the entrypoint or command
 CMD ["python3", "yolov8_live_rtmp_stream_detection.py", "--headless"]
+
 
 # // these methods run out of disk space at GitHub
 # # Use NVIDIA CUDA base image with Ubuntu 22.04
