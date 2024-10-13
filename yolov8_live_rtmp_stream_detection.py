@@ -1,16 +1,16 @@
-#
 # yolov8_live_rtmp_stream_detection.py
-# (Updated Oct 10, 2024)
+# (Updated Oct 13, 2024)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.160
+version_number = 0.161
 
 import cv2
 import torch
 import logging
 import numpy as np
+from utils import hz_line
 
 # Time and timezone related
 import time
@@ -31,6 +31,10 @@ import sys
 
 # Import web server functions
 from web_server import start_web_server, set_output_frame
+
+hz_line()
+print(f"::: dvr-yolov8-detection v{version_number} | https://github.com/FlyingFathead/dvr-yolov8-detection/")
+hz_line()
 
 # Shared data structures
 detections_list = deque(maxlen=100)  # Store up to 100 latest detections on web UI

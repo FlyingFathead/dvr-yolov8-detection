@@ -19,9 +19,8 @@ import configparser
 # Configure logging for the web server
 logger = logging.getLogger('web_server')
 logger.setLevel(logging.INFO)
-
 # Prevent messages from propagating to the root logger
-logger.propagate = False  # Add this line
+logger.propagate = False
 
 app = Flask(__name__)
 # Flask proxy fix
@@ -85,24 +84,69 @@ check_interval = config.getint('webserver', 'check_interval', fallback=10)
 # Keep track of connected clients
 connected_clients = {}
 
-# Configure logging for the web server
-logger = logging.getLogger('web_server')
-logger.setLevel(logging.INFO)
-
 # Initialize the lock for connected_clients
 connected_clients_lock = threading.Lock()
 
 # Periodically check and log active client connections.
 def log_active_connections():
-    """Periodically log active client connections."""
-    while True:
-        time.sleep(check_interval)
-        current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        with connected_clients_lock:
-            if connected_clients:
-                logger.info(f"Active connections at {current_time}: {connected_clients}")
-            else:
-                logger.info(f"No active web UI connections at {current_time}, check interval is {check_interval} seconds.")
+    """Periodically log active client connections and remove inactive ones."""
+    try:
+        logger.info("Starting active connections logging thread.")  # Confirmation log
+        previous_clients = set()
+        timeout = 60  # seconds
+        while True:
+            time.sleep(check_interval)
+            current_time = datetime.now()
+            current_time_str = current_time.strftime('%Y-%m-%d %H:%M:%S')
+
+            with connected_clients_lock:
+                active_clients = set(connected_clients.keys())
+
+                # Identify inactive clients
+                inactive_ips = []
+                for ip, last_seen in connected_clients.items():
+                    if (current_time - last_seen).total_seconds() > timeout:
+                        inactive_ips.append(ip)
+
+                # Remove inactive clients
+                for ip in inactive_ips:
+                    del connected_clients[ip]
+                    logger.info(f"Removed inactive client: {ip}")
+
+                # Update active_clients after removals
+                active_clients = set(connected_clients.keys())
+
+                if active_clients != previous_clients:  # Log only when there's a change
+                    if active_clients:
+                        logger.info(f"Active connections at {current_time_str}: {', '.join(active_clients)}")
+                    else:
+                        logger.info(f"No active web UI connections at {current_time_str}, check interval is {check_interval} seconds.")
+
+                    previous_clients = active_clients.copy()  # Update to avoid redundant logging
+                else:
+                    logger.debug(f"No change in active connections at {current_time_str}.")
+    except Exception as e:
+        logger.error(f"Error in log_active_connections thread: {e}")
+
+# # Periodically check and log active client connections.
+# def log_active_connections():
+#     """Periodically log active client connections."""
+#     logger.info("Starting active connections logging thread.")  # Add this log to confirm thread starts
+#     previous_clients = set()
+#     while True:
+#         time.sleep(check_interval)
+#         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+#         with connected_clients_lock:
+#             active_clients = set(connected_clients.keys())
+
+#             if active_clients != previous_clients:  # Only log when there's a change in active connections
+#                 if active_clients:
+#                     logger.info(f"Active connections at {current_time}: {connected_clients}")
+#                 else:
+#                     logger.info(f"No active web UI connections at {current_time}, check interval is {check_interval} seconds.")
+                
+#                 previous_clients = active_clients.copy()  # Update previous clients to avoid redundant logging
 
 # Conditionally start the background thread for logging active connections
 if interval_checks:
@@ -278,32 +322,58 @@ def log_request_info():
     client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
     current_time = time.time()
 
-    # Log request details into access log
-    # access_logger.info(f"Client IP: {client_ip} - Request URL: {request.url} - Method: {request.method} - User Agent: {request.user_agent}")
-    
-    # List of endpoints to ignore logging (e.g., video feed spam)
-    # excluded_routes = ['/video_feed', '/static/', '/favicon.ico']
-    excluded_routes = ""
-    
-    # Optional: Add this if you need more detailed logs in the main log
-    logging.info("⚠️ User connected to the webUI:")
-    logging.info(f"Request path: {request.path}")
-    logging.info(f"Request headers: {request.headers}")
+    # List of endpoints to completely ignore logging
+    excluded_routes = ['/api/current_time', '/api/detections', '/api/logs', '/video_feed', '/static/', '/favicon.ico']
 
-    # Track when clients hit an endpoint
-    if request.path not in excluded_routes:
-        with connected_clients_lock:
-            connected_clients[client_ip] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # Track IP addresses for active connections, regardless of the route
+    with connected_clients_lock:
+        # connected_clients[client_ip] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        connected_clients[client_ip] = datetime.now()
 
-    # Log requests for non-excluded routes immediately
-    if request.path not in excluded_routes:
+    # If the current request path is in the excluded routes, skip logging
+    if any(request.path.startswith(route) for route in excluded_routes):
+        return
+
+    # Get the last logged time for this client
+    last_time = last_logged_time.get(client_ip, 0)
+
+    # Log requests only if enough time has passed
+    if current_time - last_time > log_interval:
         access_logger.info(f"Client IP: {client_ip} - Request URL: {request.url} - Request Path: {request.path} - Request Headers: {request.headers} - Method: {request.method} - User Agent: {request.user_agent}")
-    else:
-        # Check if enough time has passed to log this IP again
-        last_time = last_logged_time.get(client_ip, 0)
-        if current_time - last_time > log_interval:
-            access_logger.info(f"Aggregated log - Client IP: {client_ip} - Request Path: {request.path} - Request Headers: {request.headers} - Request URL: {request.url} - Method: {request.method} - User Agent: {request.user_agent}")
-            last_logged_time[client_ip] = current_time
+        last_logged_time[client_ip] = current_time
+
+# @app.before_request
+# def log_request_info():
+#     client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
+#     current_time = time.time()
+
+#     # Log request details into access log
+#     # access_logger.info(f"Client IP: {client_ip} - Request URL: {request.url} - Method: {request.method} - User Agent: {request.user_agent}")
+    
+#     # List of endpoints to ignore logging (e.g., video feed spam)
+#     # excluded_routes = ['/video_feed', '/static/', '/favicon.ico']
+#     # excluded_routes = "/api/current_time"
+#     excluded_routes = ['/api/current_time', '/api/detections']
+
+#     # Optional: Add this if you need more detailed logs in the main log
+#     # logging.info("⚠️ User connected to the webUI:")
+#     # logging.info(f"Request path: {request.path}")
+#     # logging.info(f"Request headers: {request.headers}")
+
+#     # Track when clients hit an endpoint
+#     if request.path not in excluded_routes:
+#         with connected_clients_lock:
+#             connected_clients[client_ip] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+#     # Log requests for non-excluded routes immediately
+#     if request.path not in excluded_routes:
+#         access_logger.info(f"Client IP: {client_ip} - Request URL: {request.url} - Request Path: {request.path} - Request Headers: {request.headers} - Method: {request.method} - User Agent: {request.user_agent}")
+#     else:
+#         # Check if enough time has passed to log this IP again
+#         last_time = last_logged_time.get(client_ip, 0)
+#         if current_time - last_time > log_interval:
+#             access_logger.info(f"Aggregated log - Client IP: {client_ip} - Request Path: {request.path} - Request Headers: {request.headers} - Request URL: {request.url} - Method: {request.method} - User Agent: {request.user_agent}")
+#             last_logged_time[client_ip] = current_time
 
 @app.route('/api/current_time')
 def get_current_time():
