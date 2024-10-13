@@ -599,6 +599,9 @@ def index():
         background-color:rgba(0,0,0,0.8); z-index:1000; align-items:center; justify-content:center;">
         <span style="position:absolute; top:10px; right:20px; color:white; font-size:30px; cursor:pointer;" onclick="closeModal()">&times;</span>
         <img id="modal-image" src="" style="max-width:90%; max-height:90%;">
+        <div id="image-count" style="position:absolute; bottom:60px; left:50%; transform:translateX(-50%); color:white; font-size:16px;"></div>                                  
+        <button id="swap-button" style="position:absolute; bottom:20px; left:50%; transform:translateX(-50%);
+            padding:10px 20px; font-size:16px; cursor:pointer;">Swap Image</button>
     </div>
                                   
     <h2>Backend Logs</h2>
@@ -637,16 +640,34 @@ def index():
     <script>                                  
         function showImages(imageFilenames) {
             let currentIndex = 0;
+            let showFullFrame = true;
             const modal = document.getElementById('image-modal');
             const modalImage = document.getElementById('modal-image');
+            const swapButton = document.getElementById('swap-button');
+            const imageCountElement = document.getElementById('image-count');
 
             function showImage(index) {
-                const filename = imageFilenames[index];
+                const imageInfo = imageFilenames[index];
+                let filename = imageInfo.full_frame;
+
+                if (!showFullFrame && imageInfo.detection_area) {
+                    filename = imageInfo.detection_area;
+                } else if (!showFullFrame && !imageInfo.detection_area) {
+                    filename = imageInfo.full_frame;
+                }
+
                 modalImage.src = '/detections/' + encodeURIComponent(filename);
+                imageCountElement.textContent = `Image ${index + 1} of ${imageFilenames.length}`;
             }
 
             modal.style.display = 'flex';
             showImage(currentIndex);
+
+            // Handle swap button click
+            swapButton.onclick = function() {
+                showFullFrame = !showFullFrame;
+                showImage(currentIndex);
+            };
 
             // Navigate images with arrow keys
             document.onkeydown = function(event) {

@@ -565,6 +565,9 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
 
                 image_filenames = []
 
+                # Initialize full_frame_filename outside the loop
+                full_frame_filename = None
+
                 # Queue full-frame image for saving
                 # Save full-frame image and get relative path
                 if SAVE_FULL_FRAMES:
@@ -572,7 +575,7 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     try:
                         relative_path = save_full_frame_image(denoised_frame.copy(), detection_count)
                         if relative_path:
-                            image_filenames.append(relative_path)
+                            full_frame_filename = relative_path
                     except Exception as e:
                         main_logger.error(f"Error during full-frame image saving: {e}")
 
@@ -581,6 +584,9 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
 
                 for detection in detections:
                     x1, y1, x2, y2, confidence, class_idx = detection
+
+                    # Initialize the image_info dictionary for this detection
+                    image_info = {}
 
                     # Convert NumPy data types to native Python types
                     detection_info = {
@@ -629,15 +635,18 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                         try:
                             relative_path = save_detection_area_image(detection_area.copy(), detection_count)
                             if relative_path:
-                                image_filenames.append(relative_path)
+                                image_info['detection_area'] = relative_path
                         except Exception as e:
                             main_logger.error(f"Error during detection area image saving: {e}")
 
+                    # Include full-frame filename
+                    if full_frame_filename:
+                        image_info['full_frame'] = full_frame_filename
 
                     # Assign timestamp here
                     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-                    # Include image_filenames in detection_info
+                    # Build detection_info for this detection
                     detection_info = {
                         'detection_count': detection_count,
                         'frame_count': int(total_frames),
@@ -646,7 +655,7 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                             int(x1), int(y1), int(x2), int(y2)
                         ),
                         'confidence': float(confidence),
-                        'image_filenames': image_filenames.copy()
+                        'image_filenames': [image_info]  # List containing the image_info dictionary
                     }
 
                     # for webui; record detection timestamp
