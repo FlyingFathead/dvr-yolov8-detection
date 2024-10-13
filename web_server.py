@@ -155,18 +155,6 @@ if interval_checks:
 else:
     logger.info("Active connections logging is disabled.")
 
-# Log the active configurations on startup
-logger.info("======================================================")
-logger.info("Web Server Configuration:")
-logger.info(f"Enable Web Server: {ENABLE_WEBSERVER}")
-logger.info(f"Web Server Host: {WEBSERVER_HOST}")
-logger.info(f"Web Server Port: {WEBSERVER_PORT}")
-logger.info(f"Web Server Max FPS: {WEBSERVER_MAX_FPS}")
-logger.info(f"Check Interval: {check_interval} seconds")
-logger.info(f"Web UI Cooldown Aggregation: {WEBUI_COOLDOWN_AGGREGATION} seconds")
-logger.info(f"Web UI Bold Threshold: {WEBUI_BOLD_THRESHOLD}")
-logger.info("======================================================")
-
 def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
                      detections_list=None, logs_list=None, detections_lock=None,
                      logs_lock=None, config=None):
@@ -182,6 +170,32 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
     # Suppress Flask's default logging if necessary
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
+
+    # Start the aggregation thread here
+    aggregation_thread = threading.Thread(
+        target=aggregation_thread_function,
+        args=(
+            app.config['detections_list'],
+            app.config['detections_lock'],
+            WEBUI_COOLDOWN_AGGREGATION,
+            WEBUI_BOLD_THRESHOLD
+        ),
+        daemon=True
+    )
+    aggregation_thread.start()
+
+    # Log the active configurations on startup
+    logger.info("======================================================")
+    logger.info("Web Server Configuration:")
+    logger.info(f"Enable Web Server: {ENABLE_WEBSERVER}")
+    logger.info(f"Web Server Host: {WEBSERVER_HOST}")
+    logger.info(f"Web Server Port: {WEBSERVER_PORT}")
+    logger.info(f"Web Server Max FPS: {WEBSERVER_MAX_FPS}")
+    logger.info(f"Check Interval: {check_interval} seconds")
+    logger.info(f"Web UI Cooldown Aggregation: {WEBUI_COOLDOWN_AGGREGATION} seconds")
+    logger.info(f"Web UI Bold Threshold: {WEBUI_BOLD_THRESHOLD}")
+    logger.info("======================================================")
+
     app.run(host=host, port=port, threaded=True)
 
 def set_output_frame(frame):
@@ -234,7 +248,7 @@ def generate_frames():
             break
 
 # aggergation for the detections for webUI
-def aggregation_thread_function(cooldown=30, bold_threshold=10):
+def aggregation_thread_function(detections_list, detections_lock, cooldown=30, bold_threshold=10):
     """
     Monitors detections_list and aggregates detections into summaries based on the cooldown period.
     
@@ -248,8 +262,13 @@ def aggregation_thread_function(cooldown=30, bold_threshold=10):
     while True:
         time.sleep(1)  # Check every second
 
-        with app.config['detections_lock']:
-            if app.config['detections_list']:
+        with detections_lock:
+            if detections_list:
+
+        # // (old method)
+        # with app.config['detections_lock']:
+        #     if app.config['detections_list']:
+
                 # There are new detections
                 for detection in app.config['detections_list']:
                     timestamp = datetime.strptime(detection['timestamp'], '%Y-%m-%d %H:%M:%S')
@@ -664,18 +683,29 @@ def simulate_detection_and_logging():
 # detection_thread.start()
 # Removed simulation code for production use
 
-# Start the aggregation thread
-aggregation_thread = threading.Thread(target=aggregation_thread_function, daemon=True)
-aggregation_thread.start()
-
 if __name__ == '__main__':
-    # Example parameters; adjust as needed
+    # Load configurations
+    config = load_config()
+
+    # Extract necessary configurations
+    host = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
+    port = config.getint('webserver', 'webserver_port', fallback=5000)
+    detection_log_path = config.get('logging', 'detection_log_file', fallback='./logs/detections.log')
+
+    # Initialize shared resources
+    detections_list = deque(maxlen=100)
+    logs_list = deque(maxlen=100)
+    detections_lock = threading.Lock()
+    logs_lock = threading.Lock()
+
+    # Start the web server
     start_web_server(
-        host='0.0.0.0',
-        port=5000,
-        detection_log_path='path/to/correct_detection_log_file.log',  # Replace with actual path
-        detections_list=[],  # Initialize empty list or pass existing detections
-        logs_list=[],        # Initialize empty list or pass existing logs
-        detections_lock=threading.Lock(),
-        logs_lock=threading.Lock()
+        host=host,
+        port=port,
+        detection_log_path=detection_log_path,
+        detections_list=detections_list,
+        logs_list=logs_list,
+        detections_lock=detections_lock,
+        logs_lock=logs_lock,
+        config=config
     )

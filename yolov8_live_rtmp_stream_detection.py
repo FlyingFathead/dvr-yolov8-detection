@@ -4,7 +4,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.1611
+version_number = 0.1603
 
 import cv2
 import torch
@@ -86,8 +86,10 @@ USE_WEBCAM = config.getboolean('input', 'use_webcam', fallback=False)
 WEBCAM_INDEX = config.getint('input', 'webcam_index', fallback=0)
 STREAM_URL = config.get('stream', 'stream_url')
 DRAW_RECTANGLES = config.getboolean('detection', 'draw_rectangles')
-SAVE_DETECTIONS = config.getboolean('detection', 'save_detections')
-IMAGE_FORMAT = config.get('detection', 'image_format')
+SAVE_FULL_FRAMES = config.getboolean('detection', 'save_full_frames', fallback=True)
+FULL_FRAME_IMAGE_FORMAT = config.get('detection', 'full_frame_image_format', fallback='jpg')
+SAVE_DETECTION_AREAS = config.getboolean('detection', 'save_detection_areas', fallback=False)
+DETECTION_AREA_IMAGE_FORMAT = config.get('detection', 'detection_area_image_format', fallback='jpg')
 USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir')
 ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var')
 DEFAULT_SAVE_DIR = config.get('detection', 'default_save_dir')
@@ -391,23 +393,23 @@ def announce_detection():
             last_tts_time = current_time
         time.sleep(1)
 
-# Function to save detection image with date check
-def save_detection_image(frame, detection_count):
-    global SAVE_DIR    
-    main_logger.info(f"Current SAVE_DIR is: {SAVE_DIR}")
-    main_logger.info("Attempting to save detection image.")    
-    try:
-        # Update SAVE_DIR based on current date
-        SAVE_DIR = get_current_save_dir()
+# # Function to save detection image with date check
+# def save_detection_image(frame, detection_count):
+#     global SAVE_DIR    
+#     main_logger.info(f"Current SAVE_DIR is: {SAVE_DIR}")
+#     main_logger.info("Attempting to save detection image.")    
+#     try:
+#         # Update SAVE_DIR based on current date
+#         SAVE_DIR = get_current_save_dir()
         
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")  # Format timestamp as YYYYMMDD-HHMMSS
-        filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}.{IMAGE_FORMAT}")  # Ensure SAVE_DIR already includes date subdirs
-        if not cv2.imwrite(filename, frame):
-            main_logger.error(f"Failed to save detection image: {filename}")
-        else:
-            main_logger.info(f"Saved detection image: {filename}")
-    except Exception as e:
-        main_logger.error(f"Error saving detection image: {e}")
+#         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")  # Format timestamp as YYYYMMDD-HHMMSS
+#         filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}.{IMAGE_FORMAT}")  # Ensure SAVE_DIR already includes date subdirs
+#         if not cv2.imwrite(filename, frame):
+#             main_logger.error(f"Failed to save detection image: {filename}")
+#         else:
+#             main_logger.info(f"Saved detection image: {filename}")
+#     except Exception as e:
+#         main_logger.error(f"Error saving detection image: {e}")
 
 # Check if the CUDA denoising function is available
 def cuda_denoising_available():
@@ -510,24 +512,20 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
             detections = results[0].boxes.data.cpu().numpy()
 
             if detections.size > 0:
-                main_logger.info(f"SAVE_DETECTIONS is set to: {SAVE_DETECTIONS}")
                 if not detecting_human:
                     detecting_human = True
                     detection_ongoing.set()
                     detection_count += 1
                     main_logger.info(f"Detections found: {detections}")
 
-                # Save image for every detection frame
-                if SAVE_DETECTIONS:
-                    main_logger.info("Saving detection image.")
+                # Queue full-frame image for saving
+                if SAVE_FULL_FRAMES:
+                    main_logger.info("Saving full-frame detection image.")                    
                     try:
-
-                        # Instead of calling save_detection_image directly, put the frame in the queue
-                        image_save_queue.put((denoised_frame.copy(), detection_count))
-                        # save_detection_image(denoised_frame, detection_count)
-
+                        main_logger.info("Queueing full-frame image for saving.")
+                        image_save_queue.put((denoised_frame.copy(), detection_count, 'full_frame'))
                     except Exception as e:
-                        main_logger.error(f"Error during save_detection_image: {e}")
+                        main_logger.error(f"Error during full frame image saving: {e}")                
 
                 # **Assign timestamp here**
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -552,6 +550,16 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     #     'confidence': confidence
                     # }
 
+                    # Queue detection area image for saving
+                    if SAVE_DETECTION_AREAS:
+                        main_logger.info("Saving detection area image.")                    
+                        x1_cropped = max(0, int(x1))
+                        y1_cropped = max(0, int(y1))
+                        x2_cropped = min(denoised_frame.shape[1], int(x2))
+                        y2_cropped = min(denoised_frame.shape[0], int(y2))
+                        detection_area = denoised_frame[y1_cropped:y2_cropped, x1_cropped:x2_cropped]
+                        image_save_queue.put((detection_area.copy(), detection_count, 'detection_area'))
+
                     # for webui; record detection timestamp
                     current_time = time.time()
                     with timestamps_lock:
@@ -568,9 +576,6 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                             label = f'Person: {confidence:.2f}'
                             cv2.putText(denoised_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                         main_logger.info(f"Rectangle drawn: {x1, y1, x2, y2} with confidence {confidence:.2f}")
-
-                # if SAVE_DETECTIONS:
-                #     save_detection_image(denoised_frame, detection_count)
 
                 # Calculate the current timestamp using the local system's timezone
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z%z')
@@ -629,19 +634,60 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
 HEADLESS = False  # Initialize globally
 
 # Define the image-saving thread function
-def image_saving_thread(image_save_queue, stop_event):
+def image_saving_thread_function(image_save_queue, stop_event):
+    main_logger.info("Image saving thread started")
     while not stop_event.is_set() or not image_save_queue.empty():
         try:
-            frame, detection_count = image_save_queue.get(timeout=1)
-            save_detection_image(frame, detection_count)
+            frame, detection_count, image_type = image_save_queue.get(timeout=1)
+            main_logger.info(f"Received image to save: {image_type}, detection count: {detection_count}")
+            if image_type == 'full_frame':
+                save_full_frame_image(frame, detection_count)
+            elif image_type == 'detection_area':
+                save_detection_area_image(frame, detection_count)
+            else:
+                main_logger.warning(f"Unknown image type: {image_type}")
         except Empty:
             continue
         except Exception as e:
             main_logger.error(f"Error in image_saving_thread: {e}")
+    main_logger.info("Image saving thread stopped")
 
 # Start the image-saving thread
-image_saving_thread = threading.Thread(target=image_saving_thread, args=(image_save_queue, image_saving_stop_event))
+image_saving_thread = threading.Thread(
+    target=image_saving_thread_function,
+    args=(image_save_queue, image_saving_stop_event)
+)
 image_saving_thread.start()
+
+def save_full_frame_image(frame, detection_count):
+    global SAVE_DIR
+    try:
+        SAVE_DIR = get_current_save_dir()
+        main_logger.info(f"Current SAVE_DIR is: {SAVE_DIR}")
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}.{FULL_FRAME_IMAGE_FORMAT}")
+        main_logger.info(f"Attempting to save full-frame image to {filename}")
+        if not cv2.imwrite(filename, frame):
+            main_logger.error(f"Failed to save full-frame image: {filename}")
+        else:
+            main_logger.info(f"Saved full-frame image: {filename}")
+    except Exception as e:
+        main_logger.error(f"Error saving full-frame image: {e}")
+
+def save_detection_area_image(frame, detection_count):
+    global SAVE_DIR
+    try:
+        SAVE_DIR = get_current_save_dir()
+        main_logger.info(f"Current SAVE_DIR is: {SAVE_DIR}")
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}_area.{DETECTION_AREA_IMAGE_FORMAT}")
+        main_logger.info(f"Attempting to save detection area image to {filename}")
+        if not cv2.imwrite(filename, frame):
+            main_logger.error(f"Failed to save detection area image: {filename}")
+        else:
+            main_logger.info(f"Saved detection area image: {filename}")
+    except Exception as e:
+        main_logger.error(f"Error saving detection area image: {e}")
 
 def signal_handler(sig, frame):
     main_logger.info("Interrupt received, stopping, please wait for the program to finish...")
@@ -666,13 +712,12 @@ if __name__ == "__main__":
     log_cuda_info()  # Log CUDA information
     parser = argparse.ArgumentParser(description="YOLOv8 RTMP Stream Human Detection")
 
-    # Define mutually exclusive group for save_detections
-    save_group = parser.add_mutually_exclusive_group()
-    save_group.add_argument("--save_detections", action='store_true', help="Save images with detections")
-    save_group.add_argument("--no_save_detections", action='store_false', dest='save_detections', help="Do not save images with detections")
-
-    # Set default to None to indicate no override
-    parser.set_defaults(save_detections=None)
+    parser.add_argument("--save_full_frames", action='store_true', default=None, help="Save full-frame images when detections occur")
+    parser.add_argument("--no_save_full_frames", action='store_false', dest='save_full_frames', default=None, help="Do not save full-frame images")
+    parser.add_argument("--save_detection_areas", action='store_true', default=None, help="Save detection area images")
+    parser.add_argument("--no_save_detection_areas", action='store_false', dest='save_detection_areas', default=None, help="Do not save detection area images")
+    parser.add_argument("--full_frame_image_format", type=str, help="Image format for full-frame images (jpg or png)")
+    parser.add_argument("--detection_area_image_format", type=str, help="Image format for detection area images (jpg or png)")
 
     # Define other arguments without default values to allow config.ini to set them
     parser.add_argument("--headless", action='store_true', help="Run in headless mode without GUI display")
@@ -697,6 +742,18 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # After parsing arguments
+    if args.save_full_frames is not None:
+        SAVE_FULL_FRAMES = args.save_full_frames
+    main_logger.info(f"SAVE_FULL_FRAMES is set to: {SAVE_FULL_FRAMES}")        
+    if args.save_detection_areas is not None:
+        SAVE_DETECTION_AREAS = args.save_detection_areas
+    main_logger.info(f"SAVE_DETECTION_AREAS is set to: {SAVE_FULL_FRAMES}")                
+    if args.full_frame_image_format:
+        FULL_FRAME_IMAGE_FORMAT = args.full_frame_image_format
+    if args.detection_area_image_format:
+        DETECTION_AREA_IMAGE_FORMAT = args.detection_area_image_format
+
     # Override configurations based on command-line arguments
     if args.enable_webserver:
         ENABLE_WEBSERVER = True
@@ -710,14 +767,14 @@ if __name__ == "__main__":
         HEADLESS = True
         main_logger.info("Running in headless mode -- no GUI. Set 'headless' AND 'enable_webserver' to 'false' if you want to run the windowed GUI version.")
 
-    # Set SAVE_DETECTIONS based on args, with fallback to config
-    # After parsing arguments
-    if args.save_detections is not None:
-        SAVE_DETECTIONS = args.save_detections
-        main_logger.info(f"save_detections overridden by command-line argument: {SAVE_DETECTIONS}")
-    else:
-        SAVE_DETECTIONS = config.getboolean('detection', 'save_detections')
-        main_logger.info(f"save_detections set from config.ini: {SAVE_DETECTIONS}")
+    # # Set SAVE_DETECTIONS based on args, with fallback to config
+    # # After parsing arguments
+    # if args.save_detections is not None:
+    #     SAVE_DETECTIONS = args.save_detections
+    #     main_logger.info(f"save_detections overridden by command-line argument: {SAVE_DETECTIONS}")
+    # else:
+    #     SAVE_DETECTIONS = config.getboolean('detection', 'save_detections')
+    #     main_logger.info(f"save_detections set from config.ini: {SAVE_DETECTIONS}")
 
     # # Similarly, set DRAW_RECTANGLES based on args, with fallback to config
     # if args.draw_rectangles is not None:
@@ -764,14 +821,14 @@ if __name__ == "__main__":
         web_server_thread = threading.Thread(
             target=start_web_server,
             args=(
-                WEBSERVER_HOST,
-                WEBSERVER_PORT,
-                detection_log_path,                
-                detections_list,
-                logs_list,
-                detections_lock,
-                logs_lock,
-                config
+                WEBSERVER_HOST,        # host
+                WEBSERVER_PORT,        # port
+                detection_log_path,    # detection_log_path
+                detections_list,       # detections_list
+                logs_list,             # logs_list
+                detections_lock,       # detections_lock
+                logs_lock,             # logs_lock
+                config                 # config
                 # detection_timestamps,  # Pass detection_timestamps
                 # timestamps_lock        # Pass timestamps_lock
             ),
