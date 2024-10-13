@@ -2,8 +2,8 @@
 
 # Path to the YOLOv8 RTMP stream detection script
 SCRIPT_PATH="./yolov8_live_rtmp_stream_detection.py"
-# CMDLINE_OPTS="--headless --enable_webserver --webserver_host 127.0.0.1"
-CMDLINE_OPTS="--headless --enable_webserver --webserver_host 0.0.0.0"
+CMDLINE_OPTS="--headless --enable_webserver --webserver_host 127.0.0.1"
+# CMDLINE_OPTS="--headless --enable_webserver --webserver_host 0.0.0.0"
 
 # Default environment type
 ENV_TYPE="conda"  # Options: conda, virtualenv, none

@@ -11,6 +11,9 @@ from datetime import datetime
 import threading
 import time
 from flask import Flask, Response, render_template_string, stream_with_context, request, jsonify
+from flask import send_from_directory
+from flask import send_file
+from werkzeug.utils import safe_join
 import cv2
 import logging
 from web_graph import generate_detection_graph
@@ -157,8 +160,13 @@ else:
 
 def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
                      detections_list=None, logs_list=None, detections_lock=None,
-                     logs_lock=None, config=None):
+                     logs_lock=None, config=None, save_dir_base=None):
     """Starts the Flask web server."""
+
+    # Use the passed-in save_dir_base
+    app.config['SAVE_DIR_BASE'] = save_dir_base
+    logger.info(f"SAVE_DIR_BASE is set to: {app.config['SAVE_DIR_BASE']}")
+    
     logger.info(f"Starting web server at http://{host}:{port}")
     app.config['detection_log_path'] = detection_log_path
     app.config['detections_list'] = detections_list if detections_list is not None else []
@@ -187,13 +195,14 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
     # Log the active configurations on startup
     logger.info("======================================================")
     logger.info("Web Server Configuration:")
-    logger.info(f"Enable Web Server: {ENABLE_WEBSERVER}")
-    logger.info(f"Web Server Host: {WEBSERVER_HOST}")
-    logger.info(f"Web Server Port: {WEBSERVER_PORT}")
-    logger.info(f"Web Server Max FPS: {WEBSERVER_MAX_FPS}")
-    logger.info(f"Check Interval: {check_interval} seconds")
-    logger.info(f"Web UI Cooldown Aggregation: {WEBUI_COOLDOWN_AGGREGATION} seconds")
-    logger.info(f"Web UI Bold Threshold: {WEBUI_BOLD_THRESHOLD}")
+    logger.info(f"Enable Web Server: {config.getboolean('webserver', 'enable_webserver', fallback=True)}")
+    logger.info(f"Web Server Host: {host}")
+    logger.info(f"Web Server Port: {port}")
+    logger.info(f"Web Server Max FPS: {app.config['webserver_max_fps']}")
+    logger.info(f"Check Interval: {config.getint('webserver', 'check_interval', fallback=10)} seconds")
+    logger.info(f"Web UI Cooldown Aggregation: {config.getint('webui', 'webui_cooldown_aggregation', fallback=30)} seconds")
+    logger.info(f"Web UI Bold Threshold: {config.getint('webui', 'webui_bold_threshold', fallback=10)}")
+    logger.info(f"SAVE_DIR_BASE is set to: {app.config['SAVE_DIR_BASE']}")
     logger.info("======================================================")
 
     app.run(host=host, port=port, threaded=True)
@@ -248,32 +257,25 @@ def generate_frames():
             break
 
 # aggergation for the detections for webUI
+# At the beginning of the file
+from collections import defaultdict
+
+# Inside aggregation_thread_function
 def aggregation_thread_function(detections_list, detections_lock, cooldown=30, bold_threshold=10):
-    """
-    Monitors detections_list and aggregates detections into summaries based on the cooldown period.
-    
-    Args:
-        cooldown (int): Cooldown period in seconds after the last detection.
-        bold_threshold (int): Threshold for bolding the number of detections.
-    """
     last_detection_time = None
     current_aggregation = None  # To track ongoing aggregation
-    
+
     while True:
         time.sleep(1)  # Check every second
 
         with detections_lock:
             if detections_list:
-
-        # // (old method)
-        # with app.config['detections_lock']:
-        #     if app.config['detections_list']:
-
                 # There are new detections
-                for detection in app.config['detections_list']:
+                for detection in detections_list:
                     timestamp = datetime.strptime(detection['timestamp'], '%Y-%m-%d %H:%M:%S')
                     confidence = detection['confidence']
-                    
+                    image_filenames = detection.get('image_filenames', [])
+
                     if current_aggregation is None:
                         # Start a new aggregation
                         current_aggregation = {
@@ -281,7 +283,8 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                             'first_timestamp': timestamp,
                             'latest_timestamp': timestamp,
                             'lowest_confidence': confidence,
-                            'highest_confidence': confidence
+                            'highest_confidence': confidence,
+                            'image_filenames': image_filenames.copy()
                         }
                         # Create the summary string
                         summary = f"👀 Human detected {current_aggregation['count']} times within {cooldown} seconds! " \
@@ -290,7 +293,10 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                                   f"Lowest confidence: {current_aggregation['lowest_confidence']:.2f}, " \
                                   f"Highest confidence: {current_aggregation['highest_confidence']:.2f}"
                         with aggregated_lock:
-                            aggregated_detections_list.appendleft({'summary': summary})
+                            aggregated_detections_list.appendleft({
+                                'summary': summary,
+                                'image_filenames': current_aggregation['image_filenames']
+                            })
                     else:
                         # Update the ongoing aggregation
                         current_aggregation['count'] += 1
@@ -302,13 +308,14 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                             current_aggregation['lowest_confidence'] = confidence
                         if confidence > current_aggregation['highest_confidence']:
                             current_aggregation['highest_confidence'] = confidence
-                        
+                        current_aggregation['image_filenames'].extend(image_filenames)
+
                         # Determine if count meets or exceeds the bold_threshold
                         if current_aggregation['count'] >= bold_threshold:
                             count_display = f"<strong>{current_aggregation['count']}</strong>"
                         else:
                             count_display = f"{current_aggregation['count']}"
-                        
+
                         # Update the summary string with bolded count if applicable
                         summary = f"👀 Human detected {count_display} times within {cooldown} seconds! " \
                                   f"First seen: {current_aggregation['first_timestamp'].strftime('%Y-%m-%d %H:%M:%S')}, " \
@@ -318,21 +325,23 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                         with aggregated_lock:
                             if len(aggregated_detections_list) > 0:
                                 aggregated_detections_list[0]['summary'] = summary
+                                aggregated_detections_list[0]['image_filenames'] = current_aggregation['image_filenames']
                             else:
-                                # This should not happen, but in case
-                                aggregated_detections_list.appendleft({'summary': summary})
-                
+                                aggregated_detections_list.appendleft({
+                                    'summary': summary,
+                                    'image_filenames': current_aggregation['image_filenames']
+                                })
+
                 # Update the last_detection_time to now
                 last_detection_time = time.time()
-    
+
                 # Clear the detections_list after processing
-                app.config['detections_list'].clear()
-    
+                detections_list.clear()
+
         # Check if cooldown period has passed since the last detection
         if current_aggregation and last_detection_time:
             if (time.time() - last_detection_time) >= cooldown:
-                # Finalize the current aggregation by keeping it as is
-                # Reset the aggregation to allow new aggregations
+                # Finalize the current aggregation
                 current_aggregation = None
                 last_detection_time = None
 
@@ -393,6 +402,36 @@ def log_request_info():
 #         if current_time - last_time > log_interval:
 #             access_logger.info(f"Aggregated log - Client IP: {client_ip} - Request Path: {request.path} - Request Headers: {request.headers} - Request URL: {request.url} - Method: {request.method} - User Agent: {request.user_agent}")
 #             last_logged_time[client_ip] = current_time
+
+@app.route('/detections/<path:filename>')
+def serve_detection_image(filename):
+    save_dir_base = app.config.get('SAVE_DIR_BASE', './yolo_detections')
+    logger.info(f"SAVE_DIR_BASE: {save_dir_base}")
+    logger.info(f"Requested filename: {filename}")
+    # Use os.path.join and os.path.abspath
+    filepath = os.path.abspath(os.path.join(save_dir_base, filename))
+    logger.info(f"Computed filepath: {filepath}")
+    # Security check to prevent directory traversal
+    if not filepath.startswith(os.path.abspath(save_dir_base)):
+        logger.error("Attempted directory traversal attack")
+        return "Forbidden", 403
+    if os.path.isfile(filepath):
+        return send_file(filepath)
+    else:
+        logger.error(f"File not found: {filepath}")
+        return "File not found", 404
+
+# # send from directory method // flask doesn't allow
+# @app.route('/detections/<path:filename>')
+# def serve_detection_image(filename):
+#     save_dir_base = app.config.get('SAVE_DIR_BASE', './yolo_detections')
+#     filepath = safe_join(save_dir_base, filename)
+#     if os.path.isfile(filepath):
+#         directory = os.path.dirname(filepath)
+#         filename_only = os.path.basename(filepath)
+#         return send_from_directory(directory, filename_only)
+#     else:
+#         return "File not found", 404
 
 @app.route('/api/current_time')
 def get_current_time():
@@ -500,6 +539,32 @@ def index():
             font-size: 1.1em;
             color: #333;
         }
+        #image-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #image-modal img {
+            max-width: 90%;
+            max-height: 90%;
+        }
+
+        #image-modal span {
+            position: absolute;
+            top: 10px;
+            right: 20px;
+            color: white;
+            font-size: 30px;
+            cursor: pointer;
+        }                                  
     </style>
 </head>
 <body>
@@ -514,10 +579,22 @@ def index():
     <h2>Latest Detections</h2>
     <ul id="detections-list">
         {% for detection in detections %}
-            <li>{{ detection.summary | safe }}</li>
+            <li>
+                {{ detection.summary | safe }}
+                {% if detection.image_filenames %}
+                    - <a href="#" onclick="showImages({{ detection.image_filenames | tojson }}); return false;">View Images</a>
+                {% endif %}
+            </li>
         {% endfor %}
     </ul>
 
+    <!-- Modal Structure -->
+    <div id="image-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; 
+        background-color:rgba(0,0,0,0.8); z-index:1000; align-items:center; justify-content:center;">
+        <span style="position:absolute; top:10px; right:20px; color:white; font-size:30px; cursor:pointer;" onclick="closeModal()">&times;</span>
+        <img id="modal-image" src="" style="max-width:90%; max-height:90%;">
+    </div>
+                                  
     <h2>Backend Logs</h2>
     <ul id="logs-list">
         {% for log in logs %}
@@ -551,7 +628,45 @@ def index():
         </div>
     {% endif %}
 
-    <script>
+    <script>                                  
+        function showImages(imageFilenames) {
+            let currentIndex = 0;
+            const modal = document.getElementById('image-modal');
+            const modalImage = document.getElementById('modal-image');
+
+            function showImage(index) {
+                const filename = imageFilenames[index];
+                modalImage.src = '/detections/' + encodeURIComponent(filename);
+            }
+
+            modal.style.display = 'flex';
+            showImage(currentIndex);
+
+            // Navigate images with arrow keys
+            document.onkeydown = function(event) {
+                if (event.keyCode == 37) { // Left arrow
+                    if (currentIndex > 0) {
+                        currentIndex--;
+                        showImage(currentIndex);
+                    }
+                } else if (event.keyCode == 39) { // Right arrow
+                    if (currentIndex < imageFilenames.length - 1) {
+                        currentIndex++;
+                        showImage(currentIndex);
+                    }
+                } else if (event.keyCode == 27) { // Escape key
+                    closeModal();
+                }
+            }
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('image-modal');
+            modal.style.display = 'none';
+            document.onkeydown = null;
+        }
+
+
         // Function to fetch and update detections
         function fetchDetections() {
             fetch('/api/detections')
@@ -562,6 +677,22 @@ def index():
                     data.forEach(detection => {
                         const li = document.createElement('li');
                         li.innerHTML = detection.summary; // Use innerHTML to render HTML content
+
+                        if (detection.image_filenames && detection.image_filenames.length > 0) {
+                            // Add the "View Images" link
+                            const linkText = document.createTextNode(' - ');
+                            li.appendChild(linkText);
+
+                            const link = document.createElement('a');
+                            link.href = '#';
+                            link.textContent = 'View Images';
+                            link.onclick = function() {
+                                showImages(detection.image_filenames);
+                                return false;
+                            };
+                            li.appendChild(link);
+                        }
+
                         detectionsList.appendChild(li);
                     });
                 })
@@ -683,6 +814,52 @@ def simulate_detection_and_logging():
 # detection_thread.start()
 # Removed simulation code for production use
 
+def get_base_save_dir(config):
+    base_save_dir = None
+
+    # Read USE_ENV_SAVE_DIR and ENV_SAVE_DIR_VAR from config
+    USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
+    ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var', fallback='YOLO_SAVE_DIR')
+
+    logger.info(f"USE_ENV_SAVE_DIR: {USE_ENV_SAVE_DIR}")
+    logger.info(f"ENV_SAVE_DIR_VAR: {ENV_SAVE_DIR_VAR}")
+
+    # Same logic as in your detection script
+    if USE_ENV_SAVE_DIR:
+        env_dir = os.getenv(ENV_SAVE_DIR_VAR)
+        logger.info(f"Environment variable {ENV_SAVE_DIR_VAR} value: {env_dir}")
+        if env_dir and os.path.exists(env_dir) and os.access(env_dir, os.W_OK):
+            logger.info(f"Using environment-specified save directory: {env_dir}")
+            base_save_dir = env_dir
+        else:
+            logger.warning(
+                f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}"
+            )
+
+    if not base_save_dir:
+        SAVE_DIR_BASE = config.get('detection', 'save_dir_base', fallback='./yolo_detections')
+        logger.info(f"Attempting to use save_dir_base from config: {SAVE_DIR_BASE}")
+        if os.path.exists(SAVE_DIR_BASE) and os.access(SAVE_DIR_BASE, os.W_OK):
+            logger.info(f"Using save_dir_base from config: {SAVE_DIR_BASE}")
+            base_save_dir = SAVE_DIR_BASE
+        else:
+            logger.warning(f"save_dir_base {SAVE_DIR_BASE} does not exist or is not writable. Attempting to create it.")
+            try:
+                os.makedirs(SAVE_DIR_BASE, exist_ok=True)
+                if os.access(SAVE_DIR_BASE, os.W_OK):
+                    logger.info(f"Created and using save_dir_base: {SAVE_DIR_BASE}")
+                    base_save_dir = SAVE_DIR_BASE
+                else:
+                    logger.warning(f"save_dir_base {SAVE_DIR_BASE} is not writable after creation.")
+            except Exception as e:
+                logger.error(f"Failed to create save_dir_base: {SAVE_DIR_BASE}. Error: {e}")
+
+    if not base_save_dir:
+        raise RuntimeError("No writable save directory available.")
+
+    logger.info(f"Final base_save_dir: {base_save_dir}")
+    return base_save_dir
+
 if __name__ == '__main__':
     # Load configurations
     config = load_config()
@@ -690,7 +867,22 @@ if __name__ == '__main__':
     # Extract necessary configurations
     host = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
     port = config.getint('webserver', 'webserver_port', fallback=5000)
+
+    # Add logging to verify the values
+    logger.info(f"Host from config: {host}")
+    logger.info(f"Port from config: {port}")
+
     detection_log_path = config.get('logging', 'detection_log_file', fallback='./logs/detections.log')
+
+    # Read USE_ENV_SAVE_DIR and ENV_SAVE_DIR_VAR from config.ini
+    USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
+    ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var', fallback='DETECTION_SAVE_DIR')
+    FALLBACK_SAVE_DIR = config.get('detection', 'fallback_save_dir', fallback='./yolo_detections')
+    DEFAULT_SAVE_DIR = config.get('detection', 'default_save_dir', fallback='./yolo_detections')
+
+    # Initialize SAVE_DIR_BASE
+    SAVE_DIR_BASE = get_base_save_dir(config)
+    logger.info(f"SAVE_DIR_BASE is set to: {app.config['SAVE_DIR_BASE']}")
 
     # Initialize shared resources
     detections_list = deque(maxlen=100)
@@ -707,5 +899,6 @@ if __name__ == '__main__':
         logs_list=logs_list,
         detections_lock=detections_lock,
         logs_lock=logs_lock,
-        config=config
+        config=config,
+        save_dir_base=SAVE_DIR_BASE        
     )

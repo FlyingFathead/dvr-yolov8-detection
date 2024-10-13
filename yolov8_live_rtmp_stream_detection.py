@@ -4,7 +4,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.1604
+version_number = 0.1605
 
 import cv2
 import torch
@@ -17,7 +17,7 @@ import time
 from datetime import datetime
 import pytz
 
-from collections import deque
+from collections import deque, defaultdict
 import pyttsx3
 import os
 from ultralytics import YOLO
@@ -49,6 +49,10 @@ logs_lock = threading.Lock()
 # Initialize the image save queue and stop event
 image_save_queue = Queue()
 image_saving_stop_event = threading.Event()
+
+# Shared data structure to hold image filenames associated with detection counts
+detection_images = defaultdict(list)
+detection_images_lock = threading.Lock()
 
 # Load configuration from `config.ini` file with case-sensitive keys
 def load_config(config_path=None):
@@ -92,8 +96,10 @@ SAVE_DETECTION_AREAS = config.getboolean('detection', 'save_detection_areas', fa
 DETECTION_AREA_IMAGE_FORMAT = config.get('detection', 'detection_area_image_format', fallback='jpg')
 DETECTION_AREA_MARGIN = config.getint('detection', 'detection_area_margin', fallback=0)
 FRAME_QUEUE_SIZE = config.getint('performance', 'frame_queue_size', fallback=10)
-USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir')
-ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var')
+USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
+ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var', fallback='YOLO_SAVE_DIR')
+# Extract SAVE_DIR_BASE from config.ini or set a default value
+SAVE_DIR_BASE = config.get('detection', 'save_dir_base', fallback='./yolo_detections')
 DEFAULT_SAVE_DIR = config.get('detection', 'default_save_dir')
 FALLBACK_SAVE_DIR = config.get('detection', 'fallback_save_dir')
 RETRY_DELAY = config.getint('detection', 'retry_delay')
@@ -274,11 +280,31 @@ def get_base_save_dir():
         env_dir = os.getenv(ENV_SAVE_DIR_VAR)
         if env_dir and os.path.exists(env_dir) and os.access(env_dir, os.W_OK):
             main_logger.info(f"Using environment-specified save directory: {env_dir}")
-            base_save_dir = env_dir
+            base_save_dir = env_dir  # Set base_save_dir here
         else:
-            main_logger.warning(f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}")
+            main_logger.warning(
+                f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}"
+            )
 
-    # 2. Fallback to fallback_save_dir
+    # 2. Use save_dir_base from config or default
+    if not base_save_dir:
+        SAVE_DIR_BASE = config.get('detection', 'save_dir_base', fallback='./yolo_detections')
+        if os.path.exists(SAVE_DIR_BASE) and os.access(SAVE_DIR_BASE, os.W_OK):
+            main_logger.info(f"Using save_dir_base from config: {SAVE_DIR_BASE}")
+            base_save_dir = SAVE_DIR_BASE
+        else:
+            main_logger.warning(f"save_dir_base {SAVE_DIR_BASE} does not exist or is not writable. Attempting to create it.")
+            try:
+                os.makedirs(SAVE_DIR_BASE, exist_ok=True)
+                if os.access(SAVE_DIR_BASE, os.W_OK):
+                    main_logger.info(f"Created and using save_dir_base: {SAVE_DIR_BASE}")
+                    base_save_dir = SAVE_DIR_BASE
+                else:
+                    main_logger.warning(f"save_dir_base {SAVE_DIR_BASE} is not writable after creation.")
+            except Exception as e:
+                main_logger.error(f"Failed to create save_dir_base: {SAVE_DIR_BASE}. Error: {e}")
+
+    # 3. Fallback to fallback_save_dir
     if not base_save_dir and FALLBACK_SAVE_DIR:
         if os.path.exists(FALLBACK_SAVE_DIR) and os.access(FALLBACK_SAVE_DIR, os.W_OK):
             main_logger.info(f"Using fallback save directory: {FALLBACK_SAVE_DIR}")
@@ -295,7 +321,7 @@ def get_base_save_dir():
             except Exception as e:
                 main_logger.error(f"Failed to create fallback save directory: {FALLBACK_SAVE_DIR}. Error: {e}")
 
-    # 3. Use default_save_dir
+    # 4. Use default_save_dir
     if not base_save_dir and DEFAULT_SAVE_DIR:
         if os.path.exists(DEFAULT_SAVE_DIR) and os.access(DEFAULT_SAVE_DIR, os.W_OK):
             main_logger.info(f"Using default save directory: {DEFAULT_SAVE_DIR}")
@@ -312,7 +338,7 @@ def get_base_save_dir():
             except Exception as e:
                 main_logger.error(f"Failed to create default save directory: {DEFAULT_SAVE_DIR}. Error: {e}")
 
-    # 4. Final fallback to a hardcoded directory (optional)
+    # 5. Final fallback to a hardcoded directory (optional)
     if not base_save_dir:
         final_fallback_dir = os.path.join(os.path.dirname(__file__), 'final_fallback_detections')
         if os.path.exists(final_fallback_dir) and os.access(final_fallback_dir, os.W_OK):
@@ -336,7 +362,9 @@ def get_base_save_dir():
     return base_save_dir
 
 # Initialize SAVE_DIR and CURRENT_DATE
+# Initialize SAVE_DIR_BASE using the updated get_base_save_dir function
 SAVE_DIR_BASE = get_base_save_dir()
+main_logger.info(f"SAVE_DIR_BASE is set to: {SAVE_DIR_BASE}")
 CURRENT_DATE = datetime.now().date()
 
 # Function to get the current save directory with date-based subdirectories
@@ -493,6 +521,9 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
     total_frames = 0
     detecting_human = False
 
+    # Initialize an empty list to store image filenames
+    image_filenames = []
+
     if not headless:
         # Create a named window with the ability to resize
         cv2.namedWindow('Real-time Human Detection', cv2.WINDOW_NORMAL)
@@ -532,14 +563,18 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     detection_count += 1
                     main_logger.info(f"Detections found: {detections}")
 
+                image_filenames = []
+
                 # Queue full-frame image for saving
+                # Save full-frame image and get relative path
                 if SAVE_FULL_FRAMES:
-                    main_logger.info("Saving full-frame detection image.")                    
+                    main_logger.info("Saving full-frame detection image.")
                     try:
-                        main_logger.info("Queueing full-frame image for saving.")
-                        image_save_queue.put((denoised_frame.copy(), detection_count, 'full_frame'))
+                        relative_path = save_full_frame_image(denoised_frame.copy(), detection_count)
+                        if relative_path:
+                            image_filenames.append(relative_path)
                     except Exception as e:
-                        main_logger.error(f"Error during full frame image saving: {e}")                
+                        main_logger.error(f"Error during full-frame image saving: {e}")
 
                 # **Assign timestamp here**
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -549,6 +584,7 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
 
                     # Convert NumPy data types to native Python types
                     detection_info = {
+                        'detection_count': detection_count,                        
                         'frame_count': int(total_frames),
                         'timestamp': timestamp,
                         'coordinates': (
@@ -564,7 +600,21 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     #     'confidence': confidence
                     # }
 
-                    # Queue detection area image for saving
+                    # # Queue detection area image for saving
+                    # if SAVE_DETECTION_AREAS:
+                    #     main_logger.info("Saving detection area image with margin.")
+                    #     main_logger.info(f"Applying margin of {DETECTION_AREA_MARGIN} pixels to detection area.")
+
+                    #     # Apply margin
+                    #     x1_margined = max(0, int(x1) - DETECTION_AREA_MARGIN)
+                    #     y1_margined = max(0, int(y1) - DETECTION_AREA_MARGIN)
+                    #     x2_margined = min(denoised_frame.shape[1], int(x2) + DETECTION_AREA_MARGIN)
+                    #     y2_margined = min(denoised_frame.shape[0], int(y2) + DETECTION_AREA_MARGIN)
+
+                    #     detection_area = denoised_frame[y1_margined:y2_margined, x1_margined:x2_margined]
+                    #     image_save_queue.put((detection_area.copy(), detection_count, 'detection_area'))
+
+                    # Save detection area image and get filename
                     if SAVE_DETECTION_AREAS:
                         main_logger.info("Saving detection area image with margin.")
                         main_logger.info(f"Applying margin of {DETECTION_AREA_MARGIN} pixels to detection area.")
@@ -576,7 +626,28 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                         y2_margined = min(denoised_frame.shape[0], int(y2) + DETECTION_AREA_MARGIN)
 
                         detection_area = denoised_frame[y1_margined:y2_margined, x1_margined:x2_margined]
-                        image_save_queue.put((detection_area.copy(), detection_count, 'detection_area'))
+                        try:
+                            relative_path = save_detection_area_image(detection_area.copy(), detection_count)
+                            if relative_path:
+                                image_filenames.append(relative_path)
+                        except Exception as e:
+                            main_logger.error(f"Error during detection area image saving: {e}")
+
+
+                    # Assign timestamp here
+                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+                    # Include image_filenames in detection_info
+                    detection_info = {
+                        'detection_count': detection_count,
+                        'frame_count': int(total_frames),
+                        'timestamp': timestamp,
+                        'coordinates': (
+                            int(x1), int(y1), int(x2), int(y2)
+                        ),
+                        'confidence': float(confidence),
+                        'image_filenames': image_filenames.copy()
+                    }
 
                     # for webui; record detection timestamp
                     current_time = time.time()
@@ -659,11 +730,16 @@ def image_saving_thread_function(image_save_queue, stop_event):
             frame, detection_count, image_type = image_save_queue.get(timeout=1)
             main_logger.info(f"Received image to save: {image_type}, detection count: {detection_count}")
             if image_type == 'full_frame':
-                save_full_frame_image(frame, detection_count)
+                filename = save_full_frame_image(frame, detection_count)
             elif image_type == 'detection_area':
-                save_detection_area_image(frame, detection_count)
+                filename = save_detection_area_image(frame, detection_count)
             else:
                 main_logger.warning(f"Unknown image type: {image_type}")
+                filename = None
+
+            if filename:
+                with detection_images_lock:
+                    detection_images[detection_count].append(filename)
         except Empty:
             continue
         except Exception as e:
@@ -678,34 +754,46 @@ image_saving_thread = threading.Thread(
 image_saving_thread.start()
 
 def save_full_frame_image(frame, detection_count):
-    global SAVE_DIR
+    global SAVE_DIR, SAVE_DIR_BASE
     try:
         SAVE_DIR = get_current_save_dir()
         main_logger.info(f"Current SAVE_DIR is: {SAVE_DIR}")
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}.{FULL_FRAME_IMAGE_FORMAT}")
-        main_logger.info(f"Attempting to save full-frame image to {filename}")
-        if not cv2.imwrite(filename, frame):
-            main_logger.error(f"Failed to save full-frame image: {filename}")
+        filename = f"{timestamp}_{detection_count}.{FULL_FRAME_IMAGE_FORMAT}"
+        filepath = os.path.join(SAVE_DIR, filename)
+        main_logger.info(f"Attempting to save full-frame image to {filepath}")
+        if not cv2.imwrite(filepath, frame):
+            main_logger.error(f"Failed to save full-frame image: {filepath}")
+            return None
         else:
-            main_logger.info(f"Saved full-frame image: {filename}")
+            main_logger.info(f"Saved full-frame image: {filepath}")
+            # Compute the relative path from SAVE_DIR_BASE to the saved image
+            relative_path = os.path.relpath(filepath, SAVE_DIR_BASE)
+            return relative_path  # Return the relative path
     except Exception as e:
         main_logger.error(f"Error saving full-frame image: {e}")
-
+        return None
+    
 def save_detection_area_image(frame, detection_count):
-    global SAVE_DIR
+    global SAVE_DIR, SAVE_DIR_BASE
     try:
         SAVE_DIR = get_current_save_dir()
         main_logger.info(f"Current SAVE_DIR is: {SAVE_DIR}")
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}_area.{DETECTION_AREA_IMAGE_FORMAT}")
-        main_logger.info(f"Attempting to save detection area image to {filename}")
-        if not cv2.imwrite(filename, frame):
-            main_logger.error(f"Failed to save detection area image: {filename}")
+        filename = f"{timestamp}_{detection_count}_area.{DETECTION_AREA_IMAGE_FORMAT}"
+        filepath = os.path.join(SAVE_DIR, filename)
+        main_logger.info(f"Attempting to save detection area image to {filepath}")
+        if not cv2.imwrite(filepath, frame):
+            main_logger.error(f"Failed to save detection area image: {filepath}")
+            return None
         else:
-            main_logger.info(f"Saved detection area image: {filename}")
+            main_logger.info(f"Saved detection area image: {filepath}")
+            # Compute the relative path from SAVE_DIR_BASE to the saved image
+            relative_path = os.path.relpath(filepath, SAVE_DIR_BASE)
+            return relative_path  # Return the relative path
     except Exception as e:
         main_logger.error(f"Error saving detection area image: {e}")
+        return None
 
 def signal_handler(sig, frame):
     main_logger.info("Interrupt received, stopping, please wait for the program to finish...")
