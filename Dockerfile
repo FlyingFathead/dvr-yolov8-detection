@@ -73,7 +73,7 @@ RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
     ..
 
 # Build and install OpenCV
-RUN make -j$(nproc) && make install && ldconfig
+RUN make -j$(nproc) && make install && ldconfig && make clean && rm -rf /opt/opencv_build
 
 # Stage 2: Create the final image
 FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
@@ -83,7 +83,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
 # Install runtime dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --allow-change-held-packages --no-install-recommends \
     libnvidia-ml-dev \
     libcudnn9-cuda-12 \
     libcudnn9-dev-cuda-12 \
@@ -95,6 +95,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     espeak-ng \
     libespeak-ng1 \
     && rm -rf /var/lib/apt/lists/*
+
+# Optional: List held packages for debugging
+RUN apt-mark showhold
 
 # Upgrade pip and install runtime Python dependencies
 RUN python3 -m pip install --upgrade pip
