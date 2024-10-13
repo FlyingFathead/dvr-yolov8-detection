@@ -5,6 +5,7 @@
 # Web server module for real-time YOLOv8 detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+import sys
 import os
 from collections import deque
 from datetime import datetime
@@ -163,8 +164,9 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
                      logs_lock=None, config=None, save_dir_base=None):
     """Starts the Flask web server."""
 
-    # Use the passed-in save_dir_base
-    app.config['SAVE_DIR_BASE'] = save_dir_base
+    # Initialize SAVE_DIR_BASE within the web server process
+    SAVE_DIR_BASE = get_base_save_dir(config)
+    app.config['SAVE_DIR_BASE'] = SAVE_DIR_BASE
     logger.info(f"SAVE_DIR_BASE is set to: {app.config['SAVE_DIR_BASE']}")
     
     logger.info(f"Starting web server at http://{host}:{port}")
@@ -205,7 +207,8 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
     logger.info(f"SAVE_DIR_BASE is set to: {app.config['SAVE_DIR_BASE']}")
     logger.info("======================================================")
 
-    app.run(host=host, port=port, threaded=True)
+    # app.run(host=host, port=port, threaded=True)
+    app.run(host=host, port=port, threaded=True, use_reloader=False)    
 
 def set_output_frame(frame):
     """Updates the global output frame to be served to clients."""
@@ -412,6 +415,9 @@ def serve_detection_image(filename):
     filepath = os.path.abspath(os.path.join(save_dir_base, filename))
     logger.info(f"Computed filepath: {filepath}")
     # Security check to prevent directory traversal
+    if not save_dir_base:
+        logger.error("save_dir_base is None. Cannot serve image.")
+        return "Internal Server Error", 500
     if not filepath.startswith(os.path.abspath(save_dir_base)):
         logger.error("Attempted directory traversal attack")
         return "Forbidden", 403
@@ -817,14 +823,13 @@ def simulate_detection_and_logging():
 def get_base_save_dir(config):
     base_save_dir = None
 
-    # Read USE_ENV_SAVE_DIR and ENV_SAVE_DIR_VAR from config
+    # Read configurations
     USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
     ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var', fallback='YOLO_SAVE_DIR')
-
     logger.info(f"USE_ENV_SAVE_DIR: {USE_ENV_SAVE_DIR}")
     logger.info(f"ENV_SAVE_DIR_VAR: {ENV_SAVE_DIR_VAR}")
 
-    # Same logic as in your detection script
+    # Check environment variable
     if USE_ENV_SAVE_DIR:
         env_dir = os.getenv(ENV_SAVE_DIR_VAR)
         logger.info(f"Environment variable {ENV_SAVE_DIR_VAR} value: {env_dir}")
@@ -832,10 +837,9 @@ def get_base_save_dir(config):
             logger.info(f"Using environment-specified save directory: {env_dir}")
             base_save_dir = env_dir
         else:
-            logger.warning(
-                f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}"
-            )
+            logger.warning(f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}")
 
+    # Fallback to config value
     if not base_save_dir:
         SAVE_DIR_BASE = config.get('detection', 'save_dir_base', fallback='./yolo_detections')
         logger.info(f"Attempting to use save_dir_base from config: {SAVE_DIR_BASE}")
@@ -855,6 +859,7 @@ def get_base_save_dir(config):
                 logger.error(f"Failed to create save_dir_base: {SAVE_DIR_BASE}. Error: {e}")
 
     if not base_save_dir:
+        logger.error("No writable save directory available. Exiting.")
         raise RuntimeError("No writable save directory available.")
 
     logger.info(f"Final base_save_dir: {base_save_dir}")
@@ -868,29 +873,13 @@ if __name__ == '__main__':
     host = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
     port = config.getint('webserver', 'webserver_port', fallback=5000)
 
-    # Add logging to verify the values
-    logger.info(f"Host from config: {host}")
-    logger.info(f"Port from config: {port}")
-
-    detection_log_path = config.get('logging', 'detection_log_file', fallback='./logs/detections.log')
-
-    # Read USE_ENV_SAVE_DIR and ENV_SAVE_DIR_VAR from config.ini
-    USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
-    ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var', fallback='DETECTION_SAVE_DIR')
-    FALLBACK_SAVE_DIR = config.get('detection', 'fallback_save_dir', fallback='./yolo_detections')
-    DEFAULT_SAVE_DIR = config.get('detection', 'default_save_dir', fallback='./yolo_detections')
-
-    # Initialize SAVE_DIR_BASE
-    SAVE_DIR_BASE = get_base_save_dir(config)
-    logger.info(f"SAVE_DIR_BASE is set to: {app.config['SAVE_DIR_BASE']}")
-
     # Initialize shared resources
     detections_list = deque(maxlen=100)
     logs_list = deque(maxlen=100)
     detections_lock = threading.Lock()
     logs_lock = threading.Lock()
 
-    # Start the web server
+    # Start the web server without passing save_dir_base
     start_web_server(
         host=host,
         port=port,
@@ -899,6 +888,5 @@ if __name__ == '__main__':
         logs_list=logs_list,
         detections_lock=detections_lock,
         logs_lock=logs_lock,
-        config=config,
-        save_dir_base=SAVE_DIR_BASE        
+        config=config
     )

@@ -818,6 +818,7 @@ if __name__ == "__main__":
     log_cuda_info()  # Log CUDA information
     parser = argparse.ArgumentParser(description="YOLOv8 RTMP Stream Human Detection")
 
+    parser.add_argument("--use_env_save_dir", action='store_true', help="Use environment variable for save directory")
     parser.add_argument("--save_full_frames", action='store_true', default=None, help="Save full-frame images when detections occur")
     parser.add_argument("--no_save_full_frames", action='store_false', dest='save_full_frames', default=None, help="Do not save full-frame images")
     parser.add_argument("--save_detection_areas", action='store_true', default=None, help="Save detection area images")
@@ -849,6 +850,12 @@ if __name__ == "__main__":
     parser.add_argument("--webserver_port", type=int, help="Port number for the web server")
 
     args = parser.parse_args()
+
+    # Update configurations based on command-line arguments
+    if args.use_env_save_dir:
+        USE_ENV_SAVE_DIR = True
+    else:
+        USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
 
     # After parsing arguments
     if args.save_full_frames is not None:
@@ -954,6 +961,13 @@ if __name__ == "__main__":
         )
         web_server_thread.start()
         main_logger.info(f"Web server started at http://{WEBSERVER_HOST}:{WEBSERVER_PORT}")
+
+    # Now, load configurations
+    config = load_config()
+
+    # Initialize SAVE_DIR_BASE
+    SAVE_DIR_BASE = get_base_save_dir()
+    main_logger.info(f"SAVE_DIR_BASE is set to: {SAVE_DIR_BASE}")
 
     # Initialize SAVE_DIR using the updated get_save_dir function
     try:
