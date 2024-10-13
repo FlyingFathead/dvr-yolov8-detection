@@ -1,11 +1,11 @@
 # Stage 1: Build OpenCV with CUDA
-FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04 AS builder
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
-# Install build dependencies
+# Install build dependencies and CUDA libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     build-essential \
@@ -31,17 +31,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     espeak-ng \
     libespeak-ng1 \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install CUDA dependencies with the necessary flag
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    --allow-change-held-packages \
-    libnvidia-ml-dev \
-    libcudnn9-cuda-12=9.1.* \
-    libcudnn9-dev-cuda-12=9.1.* \
-    cuda-toolkit-12-4=12.4.* \
-    libcublas-12-4=12.4.5.* \
-    libcublas-dev-12-4=12.4.5.* \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install Python dependencies needed for building OpenCV
@@ -93,15 +82,14 @@ FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
-# Install runtime dependencies with the necessary flag
+# Install runtime dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    --allow-change-held-packages \
     libnvidia-ml-dev \
-    libcudnn9-cuda-12=9.1.* \
-    libcudnn9-dev-cuda-12=9.1.* \
-    cuda-toolkit-12-4=12.4.* \
-    libcublas-12-4=12.4.5.* \
-    libcublas-dev-12-4=12.4.5.* \
+    libcudnn9-cuda-12 \
+    libcudnn9-dev-cuda-12 \
+    cuda-toolkit-12-4 \
+    libcublas-12-4 \
+    libcublas-dev-12-4 \
     python3-dev \
     python3-pip \
     espeak-ng \
