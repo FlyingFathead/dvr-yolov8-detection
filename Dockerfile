@@ -33,17 +33,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libespeak-ng1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install CUDA dependencies
-RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb && \
-    dpkg -i cuda-keyring_1.0-1_all.deb && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends \
-        libnvidia-ml-dev \
-        libcudnn9-cuda-12=9.1.* \
-        libcudnn9-dev-cuda-12=9.1.* \
-        cuda-toolkit-12-4=12.4.* \
-        libcublas-12-4=12.4.5.* \
-        libcublas-dev-12-4=12.4.5.* \
+# Install CUDA dependencies with the necessary flag
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    --allow-change-held-packages \
+    libnvidia-ml-dev \
+    libcudnn9-cuda-12=9.1.* \
+    libcudnn9-dev-cuda-12=9.1.* \
+    cuda-toolkit-12-4=12.4.* \
+    libcublas-12-4=12.4.5.* \
+    libcublas-dev-12-4=12.4.5.* \
     && rm -rf /var/lib/apt/lists/*
 
 # Upgrade pip and install Python dependencies needed for building OpenCV
@@ -85,7 +83,7 @@ RUN cmake -D CMAKE_BUILD_TYPE=RELEASE \
     -D BUILD_TESTS=OFF \
     ..
 
-# Build OpenCV
+# Build and install OpenCV
 RUN make -j$(nproc) && make install && ldconfig
 
 # Stage 2: Create the final image
@@ -95,8 +93,9 @@ FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 
-# Install runtime dependencies
+# Install runtime dependencies with the necessary flag
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    --allow-change-held-packages \
     libnvidia-ml-dev \
     libcudnn9-cuda-12=9.1.* \
     libcudnn9-dev-cuda-12=9.1.* \

@@ -66,6 +66,10 @@ jobs:
           rm -rf /tmp/.buildx-cache
           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
+      # Optional: Check disk usage
+      - name: Check disk usage
+        run: df -h
+
 # name: Build and Push YOLOv8 Docker Image
 
 # on:
