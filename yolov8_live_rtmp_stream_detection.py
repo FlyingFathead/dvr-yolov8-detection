@@ -4,7 +4,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.161
+version_number = 0.1611
 
 import cv2
 import torch
@@ -23,7 +23,7 @@ import os
 from ultralytics import YOLO
 import threading
 from threading import Thread, Event, Lock
-from queue import Queue
+from queue import Queue, Empty
 import configparser
 import argparse
 import signal
@@ -45,6 +45,10 @@ detection_timestamps = deque(maxlen=10000)  # Store up to 10,000 timestamps
 timestamps_lock = threading.Lock()
 detections_lock = threading.Lock()
 logs_lock = threading.Lock()
+
+# Initialize the image save queue and stop event
+image_save_queue = Queue()
+image_saving_stop_event = threading.Event()
 
 # Load configuration from `config.ini` file with case-sensitive keys
 def load_config(config_path=None):
@@ -517,7 +521,11 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                 if SAVE_DETECTIONS:
                     main_logger.info("Saving detection image.")
                     try:
-                        save_detection_image(denoised_frame, detection_count)
+
+                        # Instead of calling save_detection_image directly, put the frame in the queue
+                        image_save_queue.put((denoised_frame.copy(), detection_count))
+                        # save_detection_image(denoised_frame, detection_count)
+
                     except Exception as e:
                         main_logger.error(f"Error during save_detection_image: {e}")
 
@@ -560,8 +568,9 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                             label = f'Person: {confidence:.2f}'
                             cv2.putText(denoised_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                         main_logger.info(f"Rectangle drawn: {x1, y1, x2, y2} with confidence {confidence:.2f}")
-                if SAVE_DETECTIONS:
-                    save_detection_image(denoised_frame, detection_count)
+
+                # if SAVE_DETECTIONS:
+                #     save_detection_image(denoised_frame, detection_count)
 
                 # Calculate the current timestamp using the local system's timezone
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z%z')
@@ -619,9 +628,26 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
 # When the user wants to exit
 HEADLESS = False  # Initialize globally
 
+# Define the image-saving thread function
+def image_saving_thread(image_save_queue, stop_event):
+    while not stop_event.is_set() or not image_save_queue.empty():
+        try:
+            frame, detection_count = image_save_queue.get(timeout=1)
+            save_detection_image(frame, detection_count)
+        except Empty:
+            continue
+        except Exception as e:
+            main_logger.error(f"Error in image_saving_thread: {e}")
+
+# Start the image-saving thread
+image_saving_thread = threading.Thread(target=image_saving_thread, args=(image_save_queue, image_saving_stop_event))
+image_saving_thread.start()
+
 def signal_handler(sig, frame):
     main_logger.info("Interrupt received, stopping, please wait for the program to finish...")
     stop_event.set()  # Signal threads to stop
+    image_saving_stop_event.set()  # Signal the image saving thread to stop
+    image_saving_thread.join()    
     if not HEADLESS and not ENABLE_WEBSERVER:
         cv2.destroyAllWindows()
     sys.exit(0)
