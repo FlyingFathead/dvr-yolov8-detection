@@ -1,3 +1,5 @@
+# name: Build and Push 'dvr-yolov8-detection' Docker Image
+
 name: Build and Push YOLOv8 Docker Image
 
 on:
@@ -12,7 +14,7 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       packages: write
@@ -34,18 +36,17 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Step 3.1: Check disk usage (before pruning)
+      - name: Check initial disk usage
+        run: df -h
+
       # Step 4: Prune Docker system to free up space
       - name: Prune Docker system
         run: docker system prune -af
 
-      # Step 5: Cache Docker layers
-      - name: Cache Docker layers
-        uses: actions/cache@v3
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-
+      # Step 5.1: Additional Docker prune before pushing the image
+      - name: Additional Docker prune
+        run: docker system prune -af
 
       # Step 6: Build and push Docker image
       - name: Build and push Docker image
@@ -56,12 +57,10 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new
           build-args: |
             OPENCV_VERSION=4.10.0
 
-      # Step 7: Update cache
+      # Step 7: Update cache (if needed)
       - name: Update cache
         if: success()
         run: |
@@ -71,8 +70,6 @@ jobs:
       # Step 8: Check disk usage (Optional for debugging)
       - name: Check disk usage
         run: df -h
-
-# name: Build and Push YOLOv8 Docker Image
 
 # on:
 #   push:
@@ -86,7 +83,7 @@ jobs:
 
 # jobs:
 #   build-and-push:
-#     runs-on: ubuntu-latest
+#     runs-on: ubuntu-22.04
 #     permissions:
 #       contents: read
 #       packages: write
@@ -108,16 +105,24 @@ jobs:
 #       - name: Set up Docker Buildx
 #         uses: docker/setup-buildx-action@v3
 
-#       # Step 4: Cache Docker layers
-#       - name: Cache Docker layers
-#         uses: actions/cache@v3
-#         with:
-#           path: /tmp/.buildx-cache
-#           key: ${{ runner.os }}-buildx-${{ github.sha }}
-#           restore-keys: |
-#             ${{ runner.os }}-buildx-
+#       # Step 3.1: Check disk usage (before pruning)
+#       - name: Check initial disk usage
+#         run: df -h
 
-#       # Step 5: Build and push Docker image
+#       # Step 4: Prune Docker system to free up space
+#       - name: Prune Docker system
+#         run: docker system prune -af
+
+#       # # Step 5: Cache Docker layers
+#       # - name: Cache Docker layers
+#       #   uses: actions/cache@v3
+#       #   with:
+#       #     path: /tmp/.buildx-cache
+#       #     key: ${{ runner.os }}-buildx-${{ github.sha }}
+#       #     restore-keys: |
+#       #       ${{ runner.os }}-buildx-
+
+#       # Step 6: Build and push Docker image
 #       - name: Build and push Docker image
 #         uses: docker/build-push-action@v5
 #         with:
@@ -126,14 +131,84 @@ jobs:
 #           tags: |
 #             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
 #             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-#           cache-from: type=local,src=/tmp/.buildx-cache
-#           cache-to: type=local,dest=/tmp/.buildx-cache-new
+#           # cache-from: type=local,src=/tmp/.buildx-cache
+#           # cache-to: type=local,dest=/tmp/.buildx-cache-new
 #           build-args: |
-#             --progress=plain          
-          
-#       # Step 6: Update cache
+#             OPENCV_VERSION=4.10.0
+
+#       # Step 7: Update cache
 #       - name: Update cache
 #         if: success()
 #         run: |
 #           rm -rf /tmp/.buildx-cache
 #           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+#       # Step 8: Check disk usage (Optional for debugging)
+#       - name: Check disk usage
+#         run: df -h
+
+# # name: Build and Push YOLOv8 Docker Image
+
+# # on:
+# #   push:
+# #     branches: [ main ]
+# #   pull_request:
+# #     branches: [ main ]
+
+# # env:
+# #   REGISTRY: ghcr.io
+# #   IMAGE_NAME: flyingfathead/dvr-yolov8-detection
+
+# # jobs:
+# #   build-and-push:
+# #     runs-on: ubuntu-latest
+# #     permissions:
+# #       contents: read
+# #       packages: write
+
+# #     steps:
+# #       # Step 1: Checkout the repository
+# #       - name: Checkout repository
+# #         uses: actions/checkout@v4
+
+# #       # Step 2: Log in to GitHub Container Registry
+# #       - name: Log in to GHCR
+# #         uses: docker/login-action@v3
+# #         with:
+# #           registry: ${{ env.REGISTRY }}
+# #           username: ${{ github.actor }}
+# #           password: ${{ secrets.GITHUB_TOKEN }}
+
+# #       # Step 3: Set up Docker Buildx
+# #       - name: Set up Docker Buildx
+# #         uses: docker/setup-buildx-action@v3
+
+# #       # Step 4: Cache Docker layers
+# #       - name: Cache Docker layers
+# #         uses: actions/cache@v3
+# #         with:
+# #           path: /tmp/.buildx-cache
+# #           key: ${{ runner.os }}-buildx-${{ github.sha }}
+# #           restore-keys: |
+# #             ${{ runner.os }}-buildx-
+
+# #       # Step 5: Build and push Docker image
+# #       - name: Build and push Docker image
+# #         uses: docker/build-push-action@v5
+# #         with:
+# #           context: .
+# #           push: true
+# #           tags: |
+# #             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+# #             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+# #           cache-from: type=local,src=/tmp/.buildx-cache
+# #           cache-to: type=local,dest=/tmp/.buildx-cache-new
+# #           build-args: |
+# #             --progress=plain          
+          
+# #       # Step 6: Update cache
+# #       - name: Update cache
+# #         if: success()
+# #         run: |
+# #           rm -rf /tmp/.buildx-cache
+# #           mv /tmp/.buildx-cache-new /tmp/.buildx-cache
