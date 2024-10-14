@@ -27,6 +27,7 @@ logger.setLevel(logging.INFO)
 logger.propagate = False
 
 app = Flask(__name__)
+
 # Flask proxy fix
 # from werkzeug.middleware.proxy_fix import ProxyFix
 # app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
@@ -406,7 +407,11 @@ def log_request_info():
 #             access_logger.info(f"Aggregated log - Client IP: {client_ip} - Request Path: {request.path} - Request Headers: {request.headers} - Request URL: {request.url} - Method: {request.method} - User Agent: {request.user_agent}")
 #             last_logged_time[client_ip] = current_time
 
-@app.route('/detections/<path:filename>')
+@app.route('/api/', methods=['GET'])
+def api_root():
+    return jsonify({"message": "API Root"}), 200
+
+@app.route('/api/detections/<path:filename>')
 def serve_detection_image(filename):
     save_dir_base = app.config.get('SAVE_DIR_BASE', './yolo_detections')
     logger.info(f"SAVE_DIR_BASE: {save_dir_base}")
@@ -491,6 +496,7 @@ def get_logs():
 
 @app.route('/')
 def index():
+    base_path = request.script_root
     """Homepage to display video streaming and aggregated detections."""
     with aggregated_lock:
         detections = list(aggregated_detections_list)
@@ -608,13 +614,17 @@ def index():
     </style>
 </head>
 <body>
+    <script>
+    const basePath = "{{ base_path }}";
+    </script>                                  
+
     <!-- Time Display Container -->
     <div id="time-container">
         <strong>Current Host Time:</strong> <span id="host-time">Loading...</span>
     </div>
 
     <h1>Real-time Human Detection</h1>
-    <img src="{{ url_for('video_feed') }}" width="100%">
+    <img src="{{ base_path }}{{ url_for('video_feed') }}" width="100%">
 
     <h2>Latest Detections</h2>
     <ul id="detections-list">
@@ -646,7 +656,7 @@ def index():
     </ul>
 
     <h2>Detection Graphs</h2>
-    <form id="graph-form" action="/" method="get">
+    <form id="graph-form" action="{{ base_path }}/" method="get">
         <label for="hours">Select Time Range:</label>
         <select name="hours" id="hours">
             <option value="1">Last 1 Hour</option>
@@ -695,7 +705,7 @@ def index():
                 filename = imageInfo.full_frame;
             }
 
-            modalImage.src = '/detections/' + encodeURIComponent(filename);
+            modalImage.src = `${basePath}/api/detections/${encodeURIComponent(filename)}`;
             imageCountElement.textContent = `Image ${index + 1} of ${imageFilenames.length}`;
         }
 
@@ -755,7 +765,7 @@ def index():
 
         // Function to fetch and update detections
         function fetchDetections() {
-            fetch('/api/detections')
+            fetch(`${basePath}/api/detections`)
                 .then(response => response.json())
                 .then(data => {
                     const detectionsList = document.getElementById('detections-list');
@@ -787,7 +797,7 @@ def index():
 
         // Function to fetch and update logs
         function fetchLogs() {
-            fetch('/api/logs')
+            fetch(`${basePath}/api/logs`)
                 .then(response => response.json())
                 .then(data => {
                     const logsList = document.getElementById('logs-list');
@@ -803,7 +813,7 @@ def index():
 
         // Function to fetch and update current host time
         function fetchCurrentTime() {
-            fetch('/api/current_time')
+            fetch(`${basePath}/api/current_time`)
                 .then(response => response.json())
                 .then(data => {
                     const hostTimeElement = document.getElementById('host-time');
@@ -835,7 +845,7 @@ def index():
             event.preventDefault(); // Prevent the default form submission
             const hours = document.getElementById('hours').value;
             // Fetch the graph image via AJAX
-            fetch(`/detection_graph/${hours}`)
+            fetch(`${basePath}/api/detection_graph/${hours}`)
                 .then(response => {
                     if (!response.ok) {
                         throw new Error('Network response was not ok');
@@ -856,16 +866,21 @@ def index():
     </script>
 </body>
 </html>
-    ''', detections=detections, logs=logs, graph_image=graph_image)
+    ''', detections=detections, logs=logs, graph_image=graph_image, base_path=base_path)
 
-@app.route('/detection_graph/<int:hours>')
+@app.route('/api/detection_graph/<int:hours>')
 def detection_graph_route(hours):
     """Route to serve the detection graph for the specified time range."""
-    detection_log_path = app.config['detection_log_path']
+    detection_log_path = app.config.get('detection_log_path')  # Safely get the path
+    if not detection_log_path:
+        logger.error("Detection log path is not set.")
+        return '<p style="color: red; font-weight: bold;">Internal Server Error.</p>', 500
+
     image_base64 = generate_detection_graph(hours, detection_log_path)
     if image_base64 is None:
         logger.info("User tried to request a detection data graph, but it was not available.")
         return '<p style="color: red; font-weight: bold;">No detection data available for this time range.</p>'
+
     return f'<img src="data:image/png;base64,{image_base64}">'
 
 def new_detection(detection):
@@ -957,6 +972,9 @@ if __name__ == '__main__':
     logs_list = deque(maxlen=100)
     detections_lock = threading.Lock()
     logs_lock = threading.Lock()
+
+    # Define detection_log_path
+    detection_log_path = detection_log_file  # This line is added
 
     # Start the web server without passing save_dir_base
     start_web_server(
