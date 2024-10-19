@@ -267,7 +267,7 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 
 ## Changelog
 - **v0.1607** 
-  - Get detection alerts via Telegram! (Optional feature)
+  - **New: Get detection alerts via [Telegram](https://core.telegram.org/api)** (optional)
   - Use [@BotFather](https://t.me/BotFather) on Telegram to create a bot token
   - Set your userid(s) (can be multiple users, comma separated) and the bot API token as environment variables:
     - `DVR_YOLOV8_ALLOWED_TELEGRAM_USERS` - allowed users/send alerts to
