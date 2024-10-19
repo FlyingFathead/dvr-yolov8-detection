@@ -1,11 +1,12 @@
 # yolov8_live_rtmp_stream_detection.py
-# (Updated Oct 13, 2024)
+# (Updated Oct 19, 2024)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.1605
+version_number = 0.1606
 
+import av
 import cv2
 import torch
 import logging
@@ -471,45 +472,46 @@ def frame_capture_thread(stream_url, use_webcam, webcam_index, frame_queue, stop
     if use_webcam:
         main_logger.info(f"Using webcam with index {webcam_index}")
         cap = cv2.VideoCapture(webcam_index)
+        if not cap.isOpened():
+            main_logger.error(f"Unable to open webcam with index {webcam_index}")
+            return
+        while not stop_event.is_set():
+            ret, frame = cap.read()
+            if not ret:
+                main_logger.warning("Failed to read frame from webcam.")
+                time.sleep(1)
+                continue
+            frame_queue.put(frame)
+        cap.release()
+        main_logger.info("Webcam video source closed.")
     else:
-        while retries < MAX_RETRIES:
-            main_logger.info(f"Attempting to open video stream: {stream_url}")
-
-            # Set FFmpeg options
-            ffmpeg_options = {
-                'rtmp_buffer': '1000',  # Increase buffer size
-                'max_delay': '5000000',  # Increase maximum delay
-                'stimeout': '5000000'  # Socket timeout
-            }
-            options = ' '.join([f'-{k} {v}' for k, v in ffmpeg_options.items()])
-            cap = cv2.VideoCapture(f'{stream_url} {options}')
-
-            # Set the timeout for the video stream
-            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, TIMEOUT * 1000)
-            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, TIMEOUT * 1000)
-
-            if cap.isOpened():
+        while retries < MAX_RETRIES and not stop_event.is_set():
+            try:
+                main_logger.info(f"Attempting to open video stream: {stream_url}")
+                container = av.open(stream_url)
                 main_logger.info("Successfully opened video stream.")
+
+                for frame in container.decode(video=0):
+                    if stop_event.is_set():
+                        break
+                    image = frame.to_ndarray(format='bgr24')
+                    frame_queue.put(image)
+                # If the stream ends, break out of the loop
                 break
-            else:
-                main_logger.error(f"Unable to open video stream: {stream_url}. Retrying in {RETRY_DELAY} seconds...")
-                time.sleep(RETRY_DELAY)
+            except av.AVError as e:
+                main_logger.error(f"Error reading video stream: {e}")
                 retries += 1
-
-    if cap is None or not cap.isOpened():
-        main_logger.error(f"Failed to open video source after {MAX_RETRIES} retries.")
-        return
-
-    while not stop_event.is_set():
-        ret, frame = cap.read()
-        if not ret:
-            main_logger.warning("Failed to read frame from source.")
-            time.sleep(1)
-            continue
-        frame_queue.put(frame)
-
-    cap.release()
-    main_logger.info("Video source closed.")
+                time.sleep(RETRY_DELAY)
+                main_logger.info(f"Retrying... ({retries}/{MAX_RETRIES})")
+            except Exception as e:
+                main_logger.error(f"Unexpected error: {e}")
+                retries += 1
+                time.sleep(RETRY_DELAY)
+                main_logger.info(f"Retrying... ({retries}/{MAX_RETRIES})")
+        if retries >= MAX_RETRIES:
+            main_logger.error(f"Failed to open video source after {MAX_RETRIES} retries.")
+            return
+        main_logger.info("RTMP video source closed.")
 
 # Frame processing thread
 def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectangles, denoise, process_fps, use_process_fps, detection_ongoing, headless):
@@ -996,7 +998,10 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Initialize threads
-    capture_thread = Thread(target=frame_capture_thread, args=(STREAM_URL, USE_WEBCAM, WEBCAM_INDEX, frame_queue, stop_event))
+    capture_thread = Thread(
+    target=frame_capture_thread,
+    args=(STREAM_URL, USE_WEBCAM, WEBCAM_INDEX, frame_queue, stop_event)
+    )
     processing_thread = Thread(target=frame_processing_thread, args=(frame_queue, stop_event, DEFAULT_CONF_THRESHOLD, DRAW_RECTANGLES, DENOISE, PROCESS_FPS, USE_PROCESS_FPS, detection_ongoing, HEADLESS))
 
     try:

@@ -279,6 +279,7 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                     timestamp = datetime.strptime(detection['timestamp'], '%Y-%m-%d %H:%M:%S')
                     confidence = detection['confidence']
                     image_filenames = detection.get('image_filenames', [])
+                    # logger.info(f"image_filenames from detection: {image_filenames}")
 
                     if current_aggregation is None:
                         # Start a new aggregation
@@ -551,6 +552,7 @@ def index():
             font-size: 1.1em;
             color: #333;
         }
+        /* Modal styles */
         #image-modal {
             display: none;
             position: fixed;
@@ -558,59 +560,148 @@ def index():
             left: 0;
             width: 100%;
             height: 100%;
-            background-color: rgba(0,0,0,0.8);
+            background-color: rgba(0,0,0,0.9);
             z-index: 1000;
             align-items: center;
             justify-content: center;
+            flex-direction: column;
+        }
+
+        #modal-content {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            z-index: 1000; /* Base z-index */                                  
+        }
+
+        #modal-image {
+            user-drag: none;
+            user-select: none;                                  
+            cursor: zoom-in;
         }
 
         #image-modal img {
-            max-width: 90%;
-            max-height: 90%;
+            max-width: 100%;
+            max-height: 70%;
+            margin-bottom: 10px;
         }
 
+        /* CSS for the X button */
         #image-modal span {
             position: absolute;
-            top: 10px;
+            top: 20px;
             right: 20px;
             color: white;
             font-size: 30px;
             cursor: pointer;
+            z-index: 1003;
         }
-    /* Modal button styles */
-    #prev-button, #next-button, #swap-button {
-        position: absolute;
-        padding: 10px 20px;
-        font-size: 16px;
-        cursor: pointer;
-        background-color: rgba(255, 255, 255, 0.8);
-        border: none;
-        border-radius: 5px;
-    }
-    #prev-button {
-        left: 20px;
-        top: 50%;
-        transform: translateY(-50%);
-    }
-    #next-button {
-        right: 20px;
-        top: 50%;
-        transform: translateY(-50%);
-    }
-    #swap-button {
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-    }
-    /* Modal image count */
-    #image-count {
-        position: absolute;
-        bottom: 60px;
-        left: 50%;
-        transform: translateX(-50%);
-        color: white;
-        font-size: 16px;
-    }                                  
+                                  
+        /* Modal image count */
+        #image-count {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: white;
+            font-size: 16px;
+            text-align: center;
+        }
+        /* Modal button styles */
+        #prev-button, #next-button {
+            position: absolute;
+            top: 0;
+            width: 15%; /* Reduced width to 15% */
+            height: 100%; /* Full height of the modal */
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            outline: none;
+            z-index: 1000;
+        }
+
+        #prev-button {
+            left: 0;
+        }
+
+        #next-button {
+            right: 0;
+        }
+
+        /* Add arrows using pseudo-elements */
+        #prev-button::before, #next-button::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            width: 30px;
+            height: 30px;
+            margin-top: -15px;
+            background-size: 30px 30px;
+            background-repeat: no-repeat;
+            background-position: center;
+        }
+
+        #prev-button::before {
+            left: 10px;
+            background-image: url('data:image/svg+xml;charset=UTF8,<svg xmlns="http://www.w3.org/2000/svg" fill="%23fff" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>');
+        }
+
+        #next-button::before {
+            right: 10px;
+            background-image: url('data:image/svg+xml;charset=UTF8,<svg xmlns="http://www.w3.org/2000/svg" fill="%23fff" viewBox="0 0 24 24"><path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z"/></svg>');
+        }
+
+        #swap-button {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: rgba(255, 255, 255, 0.9);
+            border: none;
+            border-radius: 5px;
+            z-index: 1001; /* Ensure it's above the prev/next buttons */                                  
+        }
+
+        /* Responsive design for mobile devices */
+        @media only screen and (max-width: 600px) {
+            #swap-button {
+                width: 80%;
+                font-size: 18px;
+                padding: 15px;
+            }
+            #image-modal img {
+                max-height: 60%;
+            }
+            #image-count {
+                bottom: 100px;
+                font-size: 14px;
+            }
+        }                                  
+
+        /* Loading spinner */
+        #loading-spinner {
+            display: none; /* Hidden by default */
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 40px;
+            height: 40px;
+            margin: -20px 0 0 -20px; /* Center the spinner */
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            z-index: 1002; /* Ensure it's above the image but below the close button */
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+                                  
     </style>
 </head>
 <body>
@@ -641,10 +732,13 @@ def index():
     <!-- Modal Structure -->
     <div id="image-modal">
         <span onclick="closeModal()">&times;</span>
-        <img id="modal-image" src="">
-        <div id="image-count"></div>
-        <button id="prev-button">&#8249;</button>
-        <button id="next-button">&#8250;</button>
+        <div id="modal-content">
+            <div id="loading-spinner"></div> <!-- Loading Spinner -->
+            <img id="modal-image" src="">
+            <div id="image-count"></div>
+        </div>
+        <button id="prev-button"></button>
+        <button id="next-button"></button>
         <button id="swap-button">Swap Image Type</button>
     </div>
 
@@ -687,44 +781,128 @@ def index():
         let currentIndex = 0;
         let imageFilenames = [];
         let showFullFrame = true;
-
+                          
+        const loadingSpinner = document.getElementById('loading-spinner');
         const modal = document.getElementById('image-modal');
+        const modalContent = document.getElementById('modal-content');
         const modalImage = document.getElementById('modal-image');
         const swapButton = document.getElementById('swap-button');
         const imageCountElement = document.getElementById('image-count');
         const prevButton = document.getElementById('prev-button');
         const nextButton = document.getElementById('next-button');
 
-        function showImage(index) {
-            const imageInfo = imageFilenames[index];
-            let filename = imageInfo.full_frame;
-
-            if (!showFullFrame && imageInfo.detection_area) {
-                filename = imageInfo.detection_area;
-            } else if (!showFullFrame && !imageInfo.detection_area) {
-                filename = imageInfo.full_frame;
+        // Function to clear excessive error messages
+        function clearErrorMessage() {
+            const errorMessage = document.getElementById('error-message');
+            if (errorMessage) {
+                errorMessage.remove();
             }
-
-            modalImage.src = `${basePath}/api/detections/${encodeURIComponent(filename)}`;
-            imageCountElement.textContent = `Image ${index + 1} of ${imageFilenames.length}`;
         }
 
         function showImages(images) {
+            console.log('showImages called with:', images);
             imageFilenames = images;
             currentIndex = 0;
-            showFullFrame = true;
+            showFullFrame = false; // Start with detection area images
 
             modal.style.display = 'flex';
             showImage(currentIndex);
             modalOpen = true;
         }
 
+        function showImage(index) {
+            const imageInfo = imageFilenames[index];
+            console.log('imageInfo:', imageInfo);
+            let filename;
+
+            if (showFullFrame && imageInfo.full_frame) {
+                filename = imageInfo.full_frame;
+            } else if (!showFullFrame && imageInfo.detection_area) {
+                filename = imageInfo.detection_area;
+            } else if (imageInfo.full_frame) {
+                // Fallback to full_frame if detection_area is unavailable
+                filename = imageInfo.full_frame;
+            } else {
+                console.error('No valid image filename found for:', imageInfo);
+                return; // Exit the function if no valid filename
+            }
+
+            console.log('Loading image:', filename);
+
+            // Show loading spinner
+            loadingSpinner.style.display = 'block';
+
+            // Clear any existing error messages
+            clearErrorMessage();
+
+            // Update the image count display
+            imageCountElement.textContent = `Image ${index + 1} of ${imageFilenames.length}`;
+
+            // Set the event handlers
+            modalImage.onload = function() {
+                loadingSpinner.style.display = 'none';
+                clearErrorMessage();
+            };
+
+            // Open the detection image in a new window when clicked on
+            modalImage.onclick = function() {
+                window.open(modalImage.src, '_blank');
+            };
+                                                                    
+            modalImage.onerror = function() {
+                // Check if src is not empty to prevent false errors
+                if (modalImage.src) {
+                    loadingSpinner.style.display = 'none';
+                    modalImage.alt = 'Failed to load image.';
+
+                    console.error('Failed to load image:', modalImage.src);
+
+                    let errorMessage = document.getElementById('error-message');
+                    if (!errorMessage) {
+                        errorMessage = document.createElement('div');
+                        errorMessage.id = 'error-message';
+                        errorMessage.style.color = 'white';
+                        errorMessage.style.marginTop = '10px';
+                        errorMessage.textContent = 'Failed to load image. Please try again later.';
+                        modalContent.appendChild(errorMessage);
+                    }
+                }
+            };
+
+            // Set the image source to start loading
+            modalImage.src = `${basePath}/api/detections/${encodeURIComponent(filename)}`;
+        }
+
+        modalImage.onload = function() {
+            loadingSpinner.style.display = 'none';
+            clearErrorMessage();
+        };
+
+        modalImage.onerror = function() {
+            loadingSpinner.style.display = 'none';
+            modalImage.alt = 'Failed to load image.';
+
+            console.error('Failed to load image:', modalImage.src);
+
+            let errorMessage = document.getElementById('error-message');
+            if (!errorMessage) {
+                errorMessage = document.createElement('div');
+                errorMessage.id = 'error-message';
+                errorMessage.style.color = 'white';
+                errorMessage.style.marginTop = '10px';
+                errorMessage.textContent = 'Failed to load image. Please try again later.';
+                modalContent.appendChild(errorMessage);
+            }
+        };
+
         swapButton.onclick = function() {
+            console.log("Swap button clicked");
             showFullFrame = !showFullFrame;
             showImage(currentIndex);
         };
 
         prevButton.onclick = function() {
+            console.log("Previous button clicked");
             if (currentIndex > 0) {
                 currentIndex--;
                 showImage(currentIndex);
@@ -732,16 +910,25 @@ def index():
         };
 
         nextButton.onclick = function() {
+            console.log("Next button clicked");
             if (currentIndex < imageFilenames.length - 1) {
                 currentIndex++;
                 showImage(currentIndex);
             }
         };
 
+
         function closeModal() {
             modal.style.display = 'none';
             modalOpen = false;
         }
+
+        // Close modal when clicking outside modal content
+        modal.addEventListener('click', function(event) {
+            if (event.target === modal) {
+                closeModal();
+            }
+        });
 
         // Attach the keydown event listener once
         document.addEventListener('keydown', function(event) {
@@ -762,6 +949,40 @@ def index():
                 closeModal();
             }
         });
+
+        // Implement swipe gestures for mobile devices
+        let touchStartX = null;
+
+        modal.addEventListener('touchstart', function(event) {
+            touchStartX = event.changedTouches[0].screenX;
+        }, false);
+
+        modal.addEventListener('touchend', function(event) {
+            if (touchStartX === null) {
+                return;
+            }
+
+            let touchEndX = event.changedTouches[0].screenX;
+            let diffX = touchStartX - touchEndX;
+
+            if (Math.abs(diffX) > 30) { // Swipe threshold
+                if (diffX > 0) {
+                    // Swipe left - Next image
+                    if (currentIndex < imageFilenames.length - 1) {
+                        currentIndex++;
+                        showImage(currentIndex);
+                    }
+                } else {
+                    // Swipe right - Previous image
+                    if (currentIndex > 0) {
+                        currentIndex--;
+                        showImage(currentIndex);
+                    }
+                }
+            }
+
+            touchStartX = null;
+        }, false);
 
         // Function to fetch and update detections
         function fetchDetections() {

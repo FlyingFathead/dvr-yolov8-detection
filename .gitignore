@@ -24,3 +24,6 @@ yolo_detections/
 yolo_detections/**
 logs/
 logs/**
+
+# local automation
+./run_detection_firejail.sh

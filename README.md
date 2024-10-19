@@ -266,6 +266,15 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1606** 
+  - Performance improvements: 
+    - switched to PyAV-based handling for better RTMP stream reliability with less CPU load
+  - UI/UX improvements:
+    - Web server UI/UX enhancements in image carousel browsing
+    - shows detection area by default, swappable between full frame/area
+    - clicking on the image now shows its original version
+    - better error/exception catching overall
+    - better webUI scaling in various devices etc
 - **v0.1605** Overall compatibility & bug fixes
   - Detection image carousel beta over webUI
   - If detection saving is enabled, images can be viewed from webUI
