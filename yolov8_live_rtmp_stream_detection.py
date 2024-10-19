@@ -4,7 +4,7 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.1606
+version_number = 0.1607
 
 import av
 import cv2
@@ -32,6 +32,9 @@ import sys
 
 # Import web server functions
 from web_server import start_web_server, set_output_frame
+
+# Import sending alerts on Telegram
+import telegram_alerts
 
 hz_line()
 print(f"::: dvr-yolov8-detection v{version_number} | https://github.com/FlyingFathead/dvr-yolov8-detection/")
@@ -230,6 +233,12 @@ tts_lock = Lock()
 last_tts_time = 0
 tts_thread = None
 tts_stop_event = Event()
+
+# Check if Telegram alerts are enabled
+if telegram_alerts.bot is None:
+    main_logger.warning("Telegram alerts are disabled.")
+else:
+    main_logger.info("Telegram alerts are enabled.")
 
 # Load the YOLOv8 model
 def load_model(model_variant=DEFAULT_MODEL_VARIANT):
@@ -600,6 +609,22 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                         ),
                         'confidence': float(confidence)
                     }                    
+
+                    # send alerts via Telegram if enabled
+                    # alert_message = "\n".join(detection_info)
+                    # telegram_alerts.queue_alert(alert_message)
+
+                    # Construct the detection info as a dictionary
+                    alert_message = {
+                        "detection_count": detection_info.get('detection_count', 0),
+                        "frame_count": detection_info.get('frame_count', 0),  # Ensure this key is present
+                        "timestamp": detection_info.get('timestamp', ""),
+                        "coordinates": detection_info.get('coordinates', (0, 0, 0, 0)),
+                        "confidence": detection_info.get('confidence', 0.0)
+                    }
+
+                    # Queue the alert message as a dictionary
+                    telegram_alerts.queue_alert(alert_message)                    
 
                     # detection_info = {
                     #     'frame_count': total_frames,

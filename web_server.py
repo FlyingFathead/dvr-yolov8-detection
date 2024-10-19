@@ -1,6 +1,6 @@
 
 # web_server.py
-# (Updated Oct 11, 2024)
+# (Updated Oct 19, 2024)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Web server module for real-time YOLOv8 detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
