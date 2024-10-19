@@ -26,4 +26,4 @@ logs/
 logs/**
 
 # local automation
-./run_detection_firejail.sh
+run_detection_firejail.sh
