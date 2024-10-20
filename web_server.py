@@ -588,32 +588,33 @@ def index():
         }
 
         /* CSS for the X button */
+        /* Adjust the close icon (X button) */
         #image-modal span {
             position: absolute;
-            top: 20px;
-            right: 20px;
+            top: 2vh; /* Adjusted from '20px' */
+            right: 2vh; /* Adjusted from '20px' */
             color: white;
-            font-size: 30px;
+            font-size: 5vh; /* Increased size using viewport height */
             cursor: pointer;
             z-index: 1003;
         }
                                   
         /* Modal image count */
         #image-count {
-            position: absolute;
-            bottom: 80px;
+            bottom: 12vh; /* Adjusted from '80px' */
             left: 50%;
             transform: translateX(-50%);
             color: white;
-            font-size: 16px;
+            font-size: 2vh; /* Adjusted font size */
             text-align: center;
         }
+
         /* Modal button styles */
         #prev-button, #next-button {
             position: absolute;
             top: 0;
-            width: 15%; /* Reduced width to 15% */
-            height: 100%; /* Full height of the modal */
+            width: 20%; /* Increased width for better tap area */
+            height: 100%;
             background: transparent;
             border: none;
             cursor: pointer;
@@ -634,53 +635,59 @@ def index():
             content: '';
             position: absolute;
             top: 50%;
-            width: 30px;
-            height: 30px;
-            margin-top: -15px;
-            background-size: 30px 30px;
+            width: 5vh; /* Adjusted from '30px' */
+            height: 5vh; /* Adjusted from '30px' */
+            margin-top: -2.5vh; /* Half of the new height */
+            background-size: 5vh 5vh; /* Ensure the background image scales */
             background-repeat: no-repeat;
             background-position: center;
         }
 
+
         #prev-button::before {
-            left: 10px;
+            left: 2vh; /* Adjusted from '10px' */
             background-image: url('data:image/svg+xml;charset=UTF8,<svg xmlns="http://www.w3.org/2000/svg" fill="%23fff" viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>');
         }
 
         #next-button::before {
-            right: 10px;
+            right: 2vh; /* Adjusted from '10px' */
             background-image: url('data:image/svg+xml;charset=UTF8,<svg xmlns="http://www.w3.org/2000/svg" fill="%23fff" viewBox="0 0 24 24"><path d="M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z"/></svg>');
         }
 
+        /* Adjust the Swap button */
         #swap-button {
             position: absolute;
-            bottom: 20px;
+            bottom: 2vh; /* Adjusted from '20px' */
             left: 50%;
             transform: translateX(-50%);
-            padding: 12px 24px;
-            font-size: 16px;
+            padding: 2vh 4vh; /* Adjusted for better size */
+            font-size: 2.5vh; /* Increased font size */
             cursor: pointer;
             background-color: rgba(255, 255, 255, 0.9);
             border: none;
             border-radius: 5px;
-            z-index: 1001; /* Ensure it's above the prev/next buttons */                                  
+            z-index: 1001;
         }
 
         /* Responsive design for mobile devices */
         @media only screen and (max-width: 600px) {
-            #swap-button {
-                width: 80%;
-                font-size: 18px;
-                padding: 15px;
+            #image-modal span {
+                font-size: 6vh; /* Even larger on small screens */
             }
-            #image-modal img {
-                max-height: 60%;
+            #swap-button {
+                font-size: 3vh;
+                padding: 3vh 5vh;
+            }
+            #prev-button::before, #next-button::before {
+                width: 6vh;
+                height: 6vh;
+                margin-top: -3vh;
+                background-size: 6vh 6vh;
             }
             #image-count {
-                bottom: 100px;
-                font-size: 14px;
+                font-size: 2.5vh;
             }
-        }                                  
+        }
 
         /* Loading spinner */
         #loading-spinner {
