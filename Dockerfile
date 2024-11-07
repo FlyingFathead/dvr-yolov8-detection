@@ -1,5 +1,8 @@
 # Stage 1: Build OpenCV with CUDA
-FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
+# FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
+
+# (Try the slimmer base image)
+FROM nvidia/cuda:12.4.0-devel-ubuntu22.04-slim AS builder
 
 # Set environment variables to minimize interactive prompts and set locale
 ENV DEBIAN_FRONTEND=noninteractive
