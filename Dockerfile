@@ -1,55 +1,3 @@
-# # Stage 1: Build OpenCV with CUDA
-# FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
-
-# # Set environment variables to minimize interactive prompts and set locale
-# ENV DEBIAN_FRONTEND=noninteractive
-# ENV LANG=C.UTF-8
-
-# # Define OpenCV version
-# ENV OPENCV_VERSION=4.10.0
-
-# # Install build dependencies and CUDA libraries
-# RUN apt-get update && apt-get install --allow-change-held-packages -y --no-install-recommends \
-#     wget \
-#     build-essential \
-#     gcc-10 g++-10 \
-#     cmake \
-#     git \
-#     unzip \
-#     pkg-config \
-#     libjpeg-dev \
-#     libpng-dev \
-#     libtiff-dev \
-#     libavcodec-dev \
-#     libavformat-dev \
-#     libswscale-dev \
-#     libv4l-dev \
-#     libxvidcore-dev \
-#     libx264-dev \
-#     libgtk-3-dev \
-#     libatlas-base-dev \
-#     gfortran \
-#     libgl1 \
-#     python3-dev \
-#     python3-pip \
-#     espeak-ng \
-#     libespeak-ng1 \
-#     && rm -rf /var/lib/apt/lists/* 
-
-# # Upgrade pip and install Python dependencies needed for building OpenCV
-# RUN python3 -m pip install --upgrade pip numpy
-
-# # Create a directory for OpenCV
-# WORKDIR /opt/opencv_build
-
-# # Download OpenCV and OpenCV_contrib
-# RUN wget -O opencv.zip https://github.com/opencv/opencv/archive/${OPENCV_VERSION}.zip && \
-#     wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/${OPENCV_VERSION}.zip && \
-#     unzip opencv.zip && unzip opencv_contrib.zip && \
-#     rm opencv.zip opencv_contrib.zip && \
-#     mv opencv-${OPENCV_VERSION} opencv && mv opencv_contrib-${OPENCV_VERSION} opencv_contrib && \
-#     rm -rf /var/lib/apt/lists/*    
-
 # Stage 1: Build OpenCV with CUDA
 FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
 
@@ -64,15 +12,17 @@ RUN apt-get update && \
         wget build-essential gcc-10 g++-10 cmake git unzip pkg-config libjpeg-dev libpng-dev libtiff-dev \
         libavcodec-dev libavformat-dev libswscale-dev libv4l-dev libxvidcore-dev libx264-dev libgtk-3-dev \
         libatlas-base-dev gfortran libgl1 python3-dev python3-pip espeak-ng libespeak-ng1 && \
-    python3 -m pip install --upgrade pip numpy && \
-    rm -rf /var/lib/apt/lists/* && \
+    python3 -m pip install --upgrade --no-cache-dir pip numpy && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* ; \
     mkdir -p /opt/opencv_build && cd /opt/opencv_build && \
     wget -O opencv.zip https://github.com/opencv/opencv/archive/${OPENCV_VERSION}.zip && \
     wget -O opencv_contrib.zip https://github.com/opencv/opencv_contrib/archive/${OPENCV_VERSION}.zip && \
     unzip opencv.zip && unzip opencv_contrib.zip && \
     rm opencv.zip opencv_contrib.zip && \
     mv opencv-${OPENCV_VERSION} opencv && mv opencv_contrib-${OPENCV_VERSION} opencv_contrib && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Create build directory
 WORKDIR /opt/opencv_build/opencv/build
@@ -175,7 +125,9 @@ RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://
 # Define the entrypoint or command
 CMD ["python3", "yolov8_live_rtmp_stream_detection.py", "--headless"]
 
-# // old versions, to be deleted
+
+
+# // old versions, to be deleted //
 
 # # Stage 1: Build OpenCV with CUDA
 # FROM nvidia/cuda:12.4.0-devel-ubuntu22.04 AS builder
