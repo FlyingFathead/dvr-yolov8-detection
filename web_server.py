@@ -1,12 +1,16 @@
 
 # web_server.py
-# (Updated Oct 19, 2024)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Web server module for real-time YOLOv8 detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Version number
+import version  # Import the version module
+version_number = version.version_number
 
 import sys
 import os
+import signal
+
 from collections import deque
 from datetime import datetime
 import threading
@@ -19,6 +23,7 @@ import cv2
 import logging
 from web_graph import generate_detection_graph
 import configparser
+import json
 
 # Configure logging for the web server
 logger = logging.getLogger('web_server')
@@ -37,9 +42,16 @@ app = Flask(__name__)
 output_frame = None
 frame_lock = threading.Lock()
 
-# New global variables for aggregation
-aggregated_detections_list = deque(maxlen=100)  # Adjust maxlen as needed
-aggregated_lock = threading.Lock()
+# detect interrupt signals and safely write detections if enabled
+def signal_handler(sig, frame):
+    logger.info("Interrupt received, stopping the web server.")
+    if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
+        save_aggregated_detections()
+    sys.exit(0)
+
+# Register the signal handler
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 def load_config(config_file='config.ini'):
     """Loads configuration from the specified INI file."""
@@ -84,6 +96,33 @@ WEBUI_BOLD_THRESHOLD = config.getint('webui', 'webui_bold_threshold', fallback=1
 # Read check_interval from config.ini with a fallback to 10
 interval_checks = config.getboolean('webserver', 'interval_checks', fallback=True)
 check_interval = config.getint('webserver', 'check_interval', fallback=10)
+# Persistent aggregated detections
+ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('webserver', 'enable_persistent_aggregated_detections', fallback=False)
+AGGREGATED_DETECTIONS_FILE = config.get('webserver', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
+
+if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
+    logger.info(f"Persistent aggregated detections enabled. Logging to file: {AGGREGATED_DETECTIONS_FILE}")
+
+# Gglobal variables for aggregation
+# aggregated_detections_list = deque(maxlen=100)  # Adjust maxlen as needed
+
+# Initialize the aggregated_detections_list
+if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
+    try:
+        with open(AGGREGATED_DETECTIONS_FILE, 'r') as f:
+            data = json.load(f)
+            aggregated_detections_list = deque(data, maxlen=100)
+            logger.info("Loaded aggregated detections from persistent storage.")
+    except FileNotFoundError:
+        logger.info("Aggregated detections file not found. Starting with an empty list.")
+        aggregated_detections_list = deque(maxlen=100)
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON from aggregated detections file: {e}")
+        aggregated_detections_list = deque(maxlen=100)
+else:
+    aggregated_detections_list = deque(maxlen=100)
+
+aggregated_lock = threading.Lock()
 
 # // client tracking
 # Keep track of connected clients
@@ -91,6 +130,19 @@ connected_clients = {}
 
 # Initialize the lock for connected_clients
 connected_clients_lock = threading.Lock()
+
+# save aggregated detections if enabled
+def save_aggregated_detections():
+    """Saves the aggregated detections to a JSON file."""
+    if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
+        with aggregated_lock:
+            data = list(aggregated_detections_list)
+        try:
+            with open(AGGREGATED_DETECTIONS_FILE, 'w') as f:
+                json.dump(data, f, default=str)  # Use default=str to handle any non-serializable data
+            logger.info("Aggregated detections saved to persistent storage.")
+        except Exception as e:
+            logger.error(f"Error saving aggregated detections to file: {e}")
 
 # Periodically check and log active client connections.
 def log_active_connections():
@@ -205,6 +257,9 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
     logger.info(f"Check Interval: {config.getint('webserver', 'check_interval', fallback=10)} seconds")
     logger.info(f"Web UI Cooldown Aggregation: {config.getint('webui', 'webui_cooldown_aggregation', fallback=30)} seconds")
     logger.info(f"Web UI Bold Threshold: {config.getint('webui', 'webui_bold_threshold', fallback=10)}")
+    logger.info(f"Persistent Aggregated Detections Enabled: {ENABLE_PERSISTENT_AGGREGATED_DETECTIONS}")
+    if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
+        logger.info(f"Aggregated Detections File: {AGGREGATED_DETECTIONS_FILE}")    
     logger.info(f"SAVE_DIR_BASE is set to: {app.config['SAVE_DIR_BASE']}")
     logger.info("======================================================")
 
@@ -342,6 +397,10 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
 
                 # Clear the detections_list after processing
                 detections_list.clear()
+
+                # Save after detections if enabled
+                if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
+                    save_aggregated_detections()
 
         # Check if cooldown period has passed since the last detection
         if current_aggregation and last_detection_time:
@@ -708,7 +767,22 @@ def index():
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-                                  
+
+        /* Footer styles */
+        footer {
+            text-align: center;
+            margin-top: 40px; /* Space above the footer */
+        }
+        footer hr {
+            border: none;
+            border-top: 1px solid #ccc;
+            margin: 20px 0;
+        }
+        footer p {
+            font-size: 0.8em; /* Small text */
+            color: #666; /* Grey color for subtlety */
+        }
+
     </style>
 </head>
 <body>
@@ -1092,9 +1166,16 @@ def index():
                 });
         });
     </script>
+                                  
+    <!-- Horizontal Rule and Footer with Version Number -->
+    <hr>
+    <footer>
+        <p>Program version: {{ version }}</p>
+    </footer>
+                                  
 </body>
 </html>
-    ''', detections=detections, logs=logs, graph_image=graph_image, base_path=base_path)
+    ''', detections=detections, logs=logs, graph_image=graph_image, base_path=base_path, version=version_number)
 
 @app.route('/api/detection_graph/<int:hours>')
 def detection_graph_route(hours):

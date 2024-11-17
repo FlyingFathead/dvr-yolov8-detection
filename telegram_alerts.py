@@ -1,10 +1,12 @@
 # telegram_alerts.py
 
 # => Telegram alerts module for DVR-YOLOv8-Detection <=
-# (Updated Oct 19, 2024)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Version number
+import version  # Import the version module
+version_number = version.version_number
 
 import configparser
 import os
@@ -196,6 +198,7 @@ def send_startup_message():
     utc_time = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
     startup_message = (
         f"🚀 YOLOv8 Detection Framework started.\n"
+        f"Version number: v{version_number}\n"
         f"Local Time: {local_time}\nUTC Time: {utc_time}"
     )
     logger.info("Sending startup message...")

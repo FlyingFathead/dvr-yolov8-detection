@@ -4,7 +4,8 @@
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
-version_number = 0.1607
+import version  # Import the version module
+version_number = version.version_number
 
 import av
 import cv2
