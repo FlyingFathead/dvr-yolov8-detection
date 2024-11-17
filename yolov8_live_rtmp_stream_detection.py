@@ -34,6 +34,9 @@ import sys
 # Import web server functions
 from web_server import start_web_server, set_output_frame
 
+# Import the remote sync module
+import remote_sync
+
 # Import sending alerts on Telegram
 import telegram_alerts
 
@@ -128,6 +131,10 @@ ENABLE_WEBSERVER = config.getboolean('webserver', 'enable_webserver', fallback=F
 WEBSERVER_HOST = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
 WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
 
+# Read AGGREGATED_DETECTIONS_FILE from config for remote sync
+ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('webserver', 'enable_persistent_aggregated_detections', fallback=False)
+AGGREGATED_DETECTIONS_FILE = config.get('webserver', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
+
 # Checking variables before taking off...
 if DETECTION_AREA_MARGIN < 0:
     print("DETECTION_AREA_MARGIN is negative. Setting it to 0.")
@@ -161,6 +168,11 @@ def setup_logging():
     # Prevent root logger from propagating to higher loggers (if any)
     root_logger.propagate = False
     
+    # Define and configure the logger for remote_sync
+    remote_sync_logger = logging.getLogger("remote_sync")
+    remote_sync_logger.setLevel(logging.INFO)
+    remote_sync_logger.propagate = False
+
     # Create formatter
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
     
@@ -192,6 +204,11 @@ def setup_logging():
     detection_logger.setLevel(logging.INFO)
     detection_logger.propagate = False  # Prevent propagation to root
     
+    # **Configure 'remote_sync' logger to propagate to root logger**
+    remote_sync_logger = logging.getLogger("remote_sync")
+    remote_sync_logger.setLevel(logging.INFO)
+    remote_sync_logger.propagate = True  # Allow propagation to root logger
+
     # Initialize detection_log_path
     detection_log_path = None
     
@@ -240,6 +257,10 @@ if telegram_alerts.bot is None:
     main_logger.warning("Telegram alerts are disabled.")
 else:
     main_logger.info("Telegram alerts are enabled.")
+
+# Initialize remote sync (if enabled)
+remote_sync_obj = remote_sync.RemoteSync(config, main_logger, SAVE_DIR_BASE, AGGREGATED_DETECTIONS_FILE)
+remote_sync_obj.start()
 
 # Load the YOLOv8 model
 def load_model(model_variant=DEFAULT_MODEL_VARIANT):
@@ -627,27 +648,6 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     # Queue the alert message as a dictionary
                     telegram_alerts.queue_alert(alert_message)                    
 
-                    # detection_info = {
-                    #     'frame_count': total_frames,
-                    #     'timestamp': timestamp,
-                    #     'coordinates': (x1, y1, x2, y2),
-                    #     'confidence': confidence
-                    # }
-
-                    # # Queue detection area image for saving
-                    # if SAVE_DETECTION_AREAS:
-                    #     main_logger.info("Saving detection area image with margin.")
-                    #     main_logger.info(f"Applying margin of {DETECTION_AREA_MARGIN} pixels to detection area.")
-
-                    #     # Apply margin
-                    #     x1_margined = max(0, int(x1) - DETECTION_AREA_MARGIN)
-                    #     y1_margined = max(0, int(y1) - DETECTION_AREA_MARGIN)
-                    #     x2_margined = min(denoised_frame.shape[1], int(x2) + DETECTION_AREA_MARGIN)
-                    #     y2_margined = min(denoised_frame.shape[0], int(y2) + DETECTION_AREA_MARGIN)
-
-                    #     detection_area = denoised_frame[y1_margined:y2_margined, x1_margined:x2_margined]
-                    #     image_save_queue.put((detection_area.copy(), detection_count, 'detection_area'))
-
                     # Save detection area image and get filename
                     if SAVE_DETECTION_AREAS:
                         main_logger.info("Saving detection area image with margin.")
@@ -806,6 +806,11 @@ def save_full_frame_image(frame, detection_count):
             main_logger.info(f"Saved full-frame image: {filepath}")
             # Compute the relative path from SAVE_DIR_BASE to the saved image
             relative_path = os.path.relpath(filepath, SAVE_DIR_BASE)
+
+            # Enqueue file for remote sync if enabled
+            if remote_sync_obj.REMOTE_SYNC_ENABLED and remote_sync_obj.SYNC_FULL_FRAME_IMAGES:
+                remote_sync_obj.enqueue_file(filepath)
+
             return relative_path  # Return the relative path
     except Exception as e:
         main_logger.error(f"Error saving full-frame image: {e}")
@@ -827,6 +832,11 @@ def save_detection_area_image(frame, detection_count):
             main_logger.info(f"Saved detection area image: {filepath}")
             # Compute the relative path from SAVE_DIR_BASE to the saved image
             relative_path = os.path.relpath(filepath, SAVE_DIR_BASE)
+
+            # Enqueue file for remote sync if enabled
+            if remote_sync_obj.REMOTE_SYNC_ENABLED and remote_sync_obj.SYNC_DETECTION_AREA_IMAGES:
+                remote_sync_obj.enqueue_file(filepath)
+
             return relative_path  # Return the relative path
     except Exception as e:
         main_logger.error(f"Error saving detection area image: {e}")
@@ -836,7 +846,11 @@ def signal_handler(sig, frame):
     main_logger.info("Interrupt received, stopping, please wait for the program to finish...")
     stop_event.set()  # Signal threads to stop
     image_saving_stop_event.set()  # Signal the image saving thread to stop
-    image_saving_thread.join()    
+    image_saving_thread.join() 
+
+    # Stop remote sync thread
+    remote_sync_obj.stop()
+
     if not HEADLESS and not ENABLE_WEBSERVER:
         cv2.destroyAllWindows()
     sys.exit(0)
