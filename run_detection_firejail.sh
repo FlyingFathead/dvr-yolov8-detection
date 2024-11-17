@@ -8,6 +8,9 @@ CMDLINE_OPTS="--headless --enable_webserver --webserver_host 127.0.0.1"
 # Default environment type
 ENV_TYPE="conda"  # Options: conda, virtualenv, none
 
+# Default SSH allowance
+ALLOW_SSH=true  # Options: true, false
+
 # Name of the Conda environment
 CONDA_ENV_NAME="yolov8_env"
 
@@ -39,6 +42,17 @@ else
     exit 1
 fi
 
+# Function to display usage information
+usage() {
+    echo "Usage: $0 [--env <env_type>] [--allow-ssh <true|false>]"
+    echo ""
+    echo "Options:"
+    echo "  --env        Specify the environment type. Options: conda, virtualenv, none. Default: conda"
+    echo "  --allow-ssh  Allow SSH and SCP subprocesses within Firejail. Options: true, false. Default: true"
+    echo "  -h, --help   Display this help message and exit."
+    exit 0
+}
+
 # Parse command-line arguments
 while [[ $# -gt 0 ]]; do
     key="$1"
@@ -48,8 +62,22 @@ while [[ $# -gt 0 ]]; do
         shift # past argument
         shift # past value
         ;;
+        --allow-ssh)
+        ALLOW_SSH="$2"
+        # Validate the value
+        if [[ "$ALLOW_SSH" != "true" && "$ALLOW_SSH" != "false" ]]; then
+            echo "Error: --allow-ssh must be 'true' or 'false'."
+            usage
+        fi
+        shift # past argument
+        shift # past value
+        ;;
+        -h|--help)
+        usage
+        ;;
         *)
-        shift # past unrecognized argument
+        echo "Unknown option: $1"
+        usage
         ;;
     esac
 done
@@ -63,6 +91,37 @@ terminate_script() {
 # Trap termination signals
 trap terminate_script SIGINT SIGTERM
 
+# Function to locate ssh and scp binaries and export their paths
+locate_and_export_binaries() {
+    if [ "$ALLOW_SSH" = true ]; then
+        SSH_BIN=$(which ssh)
+        SCP_BIN=$(which scp)
+
+        if [ -z "$SSH_BIN" ]; then
+            echo "Error: ssh binary not found. Please ensure SSH is installed."
+            exit 1
+        fi
+
+        if [ -z "$SCP_BIN" ]; then
+            echo "Error: scp binary not found. Please ensure SCP is installed."
+            exit 1
+        fi
+
+        # Export the paths as environment variables
+        export SSH_BIN
+        export SCP_BIN
+
+        echo "Located ssh at: $SSH_BIN"
+        echo "Located scp at: $SCP_BIN"
+        echo "NOTE: You will need to configure Firejail to allow these separately if you wish to use SSH & SCP remote sync."
+    else
+        echo "SSH and SCP subprocesses are NOT allowed within Firejail."
+    fi
+}
+
+# Locate and export ssh and scp if allowed
+locate_and_export_binaries
+
 # Function to run the script
 run_script() {
     while true; do
@@ -73,10 +132,22 @@ run_script() {
                 if check_conda; then
                     echo "Activating Conda environment '$CONDA_ENV_NAME'."
                     conda activate "$CONDA_ENV_NAME"
-                    # Run the script
-                    firejail python "$SCRIPT_PATH" $CMDLINE_OPTS
-                    # Capture the exit code
+
+                    # Construct Firejail command
+                    FIREJAIL_CMD=(firejail --noprofile)
+
+                    if [ "$ALLOW_SSH" = true ]; then
+                        FIREJAIL_CMD+=(--whitelist="$SSH_BIN" --whitelist="$SCP_BIN")
+                        echo "SSH and SCP subprocesses are allowed within Firejail."
+                    fi
+
+                    # Append the Python command and options
+                    FIREJAIL_CMD+=(python "$SCRIPT_PATH" $CMDLINE_OPTS)
+
+                    # Execute the Firejail command
+                    "${FIREJAIL_CMD[@]}"
                     EXIT_CODE=$?
+
                     # Deactivate the environment after the script finishes
                     conda deactivate
                 else
@@ -87,7 +158,20 @@ run_script() {
             virtualenv)
                 if check_venv; then
                     echo "Using the active virtual environment at '$VIRTUAL_ENV'."
-                    firejail python "$SCRIPT_PATH" $CMDLINE_OPTS
+
+                    # Construct Firejail command
+                    FIREJAIL_CMD=(firejail --noprofile)
+
+                    if [ "$ALLOW_SSH" = true ]; then
+                        FIREJAIL_CMD+=(--whitelist="$SSH_BIN" --whitelist="$SCP_BIN")
+                        echo "SSH and SCP subprocesses are allowed within Firejail."
+                    fi
+
+                    # Append the Python command and options
+                    FIREJAIL_CMD+=(python "$SCRIPT_PATH" $CMDLINE_OPTS)
+
+                    # Execute the Firejail command
+                    "${FIREJAIL_CMD[@]}"
                     EXIT_CODE=$?
                 else
                     echo "No virtual environment is active. Exiting."
@@ -96,7 +180,20 @@ run_script() {
                 ;;
             none)
                 echo "Proceeding without activating any environment."
-                firejail python "$SCRIPT_PATH" $CMDLINE_OPTS
+
+                # Construct Firejail command
+                FIREJAIL_CMD=(firejail)
+
+                if [ "$ALLOW_SSH" = true ]; then
+                    FIREJAIL_CMD+=(--whitelist="$SSH_BIN" --whitelist="$SCP_BIN")
+                    echo "SSH and SCP subprocesses are allowed within Firejail."
+                fi
+
+                # Append the Python command and options
+                FIREJAIL_CMD+=(python "$SCRIPT_PATH" $CMDLINE_OPTS)
+
+                # Execute the Firejail command
+                "${FIREJAIL_CMD[@]}"
                 EXIT_CODE=$?
                 ;;
             *)

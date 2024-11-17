@@ -41,6 +41,7 @@ class RemoteSync:
         self.REMOTE_HOST = config.get('remote_sync', 'remote_host', fallback=None)
         self.REMOTE_DIR = config.get('remote_sync', 'remote_dir', fallback=None)
         self.REMOTE_SSH_KEY = config.get('remote_sync', 'remote_ssh_key', fallback=None)
+        self.STRIP_LOCAL_PATH = config.getboolean('remote_sync', 'strip_local_path', fallback=True)        
         self.SYNC_AGGREGATED_DETECTIONS = config.getboolean('remote_sync', 'sync_aggregated_detections', fallback=True)
         self.SYNC_DETECTION_AREA_IMAGES = config.getboolean('remote_sync', 'sync_detection_area_images', fallback=True)
         self.SYNC_FULL_FRAME_IMAGES = config.getboolean('remote_sync', 'sync_full_frame_images', fallback=False)
@@ -66,6 +67,10 @@ class RemoteSync:
             # self.REMOTE_USER, self.REMOTE_HOST, self.REMOTE_DIR are already set from config.get above
             pass
 
+        # Retrieve SSH and SCP paths from environment variables
+        self.SSH_BIN = os.getenv('SSH_BIN') if not self.USE_PARAMIKO else None
+        self.SCP_BIN = os.getenv('SCP_BIN') if not self.USE_PARAMIKO else None
+
         # Detailed logging for what's available and what's not
         missing_vars = []
         if not self.REMOTE_USER:
@@ -87,17 +92,18 @@ class RemoteSync:
             self.logger.error("Paramiko module is not installed. Remote sync requires paramiko.")
             self.REMOTE_SYNC_ENABLED = False
 
-        # If remote sync is enabled, but still incomplete configuration, disable
+        # If remote sync is enabled, handle SSH key requirements
         if self.REMOTE_SYNC_ENABLED:
             if self.USE_PARAMIKO:
                 if not self.REMOTE_SSH_KEY:
                     self.logger.warning("Remote sync is enabled with paramiko, but SSH key is not set.")
                     self.REMOTE_SYNC_ENABLED = False
             else:
-                # For system SSH, ensure that SSH key is available
+                # For system SSH, SSH key is optional. Use default if not set.
                 if not self.REMOTE_SSH_KEY:
-                    self.logger.warning("Remote sync is enabled with system SSH, but SSH key is not set.")
-                    self.REMOTE_SYNC_ENABLED = False
+                    self.logger.info("Remote sync is enabled with system SSH, using default SSH key (~/.ssh/id_rsa).")
+                else:
+                    self.logger.info(f"Remote sync is enabled with system SSH, using SSH key: {self.REMOTE_SSH_KEY}")
 
         if self.REMOTE_SYNC_ENABLED:
             self.logger.info("Remote sync is enabled.")
@@ -151,9 +157,9 @@ class RemoteSync:
                 remote_user_host = f"{self.REMOTE_USER}@{self.REMOTE_HOST}"
                 ssh_key = self.REMOTE_SSH_KEY or os.path.expanduser("~/.ssh/id_rsa")
 
-                # Execute mkdir -p on the remote server
+                # Execute mkdir -p on the remote server using absolute ssh path
                 ssh_command = [
-                    "ssh",
+                    self.SSH_BIN,
                     "-i", ssh_key,
                     remote_user_host,
                     f"mkdir -p {self.REMOTE_DIR}"
@@ -236,12 +242,24 @@ class RemoteSync:
                     ssh_key = paramiko.RSAKey.from_private_key_file(os.path.expanduser('~/.ssh/id_rsa'))
             except FileNotFoundError:
                 self.logger.error("SSH key file not found. Remote sync cannot proceed.")
-                return
+                raise
 
             transport.connect(username=self.REMOTE_USER, pkey=ssh_key)
             sftp = paramiko.SFTPClient.from_transport(transport)
 
-            remote_path = os.path.join(self.REMOTE_DIR, os.path.relpath(file_path, self.save_dir_base))
+            # Determine remote path based on STRIP_LOCAL_PATH
+            if self.STRIP_LOCAL_PATH:
+                remote_path = os.path.join(self.REMOTE_DIR, os.path.basename(file_path))
+            else:
+                # Preserve the relative directory structure
+                relative_path = os.path.relpath(file_path, self.save_dir_base)
+                remote_path = os.path.join(self.REMOTE_DIR, relative_path)
+
+            # Ensure the remote directory exists
+            remote_dir = os.path.dirname(remote_path)
+            self.mkdir_p_sftp(sftp, remote_dir)
+
+            # Upload the file
             sftp.put(file_path, remote_path)
 
             self.logger.info(f"Successfully synced {file_path} to {self.REMOTE_HOST}:{remote_path}")
@@ -259,13 +277,19 @@ class RemoteSync:
         :param file_path: Path to the file to be synced.
         """
         try:
-            remote_path = os.path.join(self.REMOTE_DIR, os.path.relpath(file_path, self.save_dir_base))
+            if self.STRIP_LOCAL_PATH:
+                remote_path = os.path.join(self.REMOTE_DIR, os.path.basename(file_path))
+            else:
+                # Preserve the relative directory structure
+                relative_path = os.path.relpath(file_path, self.save_dir_base)
+                remote_path = os.path.join(self.REMOTE_DIR, relative_path)
+
             ssh_key = self.REMOTE_SSH_KEY or os.path.expanduser("~/.ssh/id_rsa")
             remote_user_host = f"{self.REMOTE_USER}@{self.REMOTE_HOST}"
-            
-            # Perform SCP to transfer the file
+
+            # Perform SCP to transfer the file using absolute path to scp
             scp_command = [
-                "scp",
+                self.SCP_BIN,
                 "-i", ssh_key,
                 file_path,
                 f"{remote_user_host}:{remote_path}"

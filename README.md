@@ -266,6 +266,9 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1610**
+  - Remote sync features added, bugfixes
+  - Firejail & venv switches when remote syncing via SSH/SCP is enabled
 - **v0.1609**
   - Remote sync detection logs & frames to a remote SFTP/SSH server with either system `scp` or `paramiko`
   - Can be configured and enabled/disabled in `config.ini` under the `remote_sync` options
