@@ -26,7 +26,7 @@ class RemoteSync:
         :param aggregated_detections_file: Path to the aggregated detections JSON file.
         """
         self.config = config
-        self.logger = logging.getLogger("remote_sync")  # Dedicated logger for remote_sync        
+        self.logger = logging.getLogger("remote_sync")  # Dedicated logger for remote_sync
         self.save_dir_base = save_dir_base
         self.aggregated_detections_file = aggregated_detections_file
 
@@ -45,7 +45,13 @@ class RemoteSync:
         self.SYNC_DETECTION_AREA_IMAGES = config.getboolean('remote_sync', 'sync_detection_area_images', fallback=True)
         self.SYNC_FULL_FRAME_IMAGES = config.getboolean('remote_sync', 'sync_full_frame_images', fallback=False)
 
-        self.remote_sync_queue = Queue()
+        # Retry Configuration
+        self.MAX_RETRIES = config.getint('remote_sync', 'max_retries', fallback=3)
+        self.RETRY_DELAY = config.getint('remote_sync', 'retry_delay', fallback=5)
+
+        # Queue Configuration
+        self.REMOTE_SYNC_QUEUE_MAXSIZE = config.getint('remote_sync', 'remote_sync_queue_maxsize', fallback=1000)
+        self.remote_sync_queue = Queue(maxsize=self.REMOTE_SYNC_QUEUE_MAXSIZE)
         self.remote_sync_stop_event = threading.Event()
         self.remote_sync_thread = None
 
@@ -189,16 +195,29 @@ class RemoteSync:
 
     def sync_file_to_remote(self, file_path):
         """
-        Syncs a given file to the remote server using the configured method.
+        Syncs a given file to the remote server using the configured method with retries.
 
         :param file_path: Path to the file to be synced.
         """
-        if self.USE_PARAMIKO:
-            self.logger.info("Using Paramiko (SFTP) for syncing.")
-            self._sync_with_paramiko(file_path)
-        else:
-            self.logger.info("Using system SSH (scp) for syncing.")
-            self._sync_with_system_ssh(file_path)
+        attempt = 0
+        while attempt < self.MAX_RETRIES:
+            try:
+                if self.USE_PARAMIKO:
+                    self.logger.info("Using Paramiko (SFTP) for syncing.")
+                    self._sync_with_paramiko(file_path)
+                else:
+                    self.logger.info("Using system SSH (scp) for syncing.")
+                    self._sync_with_system_ssh(file_path)
+                # If sync is successful, break out of the loop
+                break
+            except Exception as e:
+                attempt += 1
+                self.logger.error(f"Attempt {attempt} failed to sync {file_path}: {e}")
+                if attempt < self.MAX_RETRIES:
+                    self.logger.info(f"Retrying in {self.RETRY_DELAY} seconds...")
+                    time.sleep(self.RETRY_DELAY)
+                else:
+                    self.logger.error(f"All {self.MAX_RETRIES} attempts failed to sync {file_path}.")
 
     def _sync_with_paramiko(self, file_path):
         """
@@ -223,13 +242,12 @@ class RemoteSync:
             sftp = paramiko.SFTPClient.from_transport(transport)
 
             remote_path = os.path.join(self.REMOTE_DIR, os.path.relpath(file_path, self.save_dir_base))
-            remote_dir = os.path.dirname(remote_path)
-            self.mkdir_p_sftp(sftp, remote_dir)
             sftp.put(file_path, remote_path)
 
             self.logger.info(f"Successfully synced {file_path} to {self.REMOTE_HOST}:{remote_path}")
         except Exception as e:
             self.logger.error(f"Failed to sync {file_path} to remote server with paramiko: {e}")
+            raise  # Re-raise exception to handle retries
         finally:
             if transport:
                 transport.close()
@@ -243,18 +261,24 @@ class RemoteSync:
         try:
             remote_path = os.path.join(self.REMOTE_DIR, os.path.relpath(file_path, self.save_dir_base))
             ssh_key = self.REMOTE_SSH_KEY or os.path.expanduser("~/.ssh/id_rsa")
-            ssh_command = [
+            remote_user_host = f"{self.REMOTE_USER}@{self.REMOTE_HOST}"
+            
+            # Perform SCP to transfer the file
+            scp_command = [
                 "scp",
                 "-i", ssh_key,
                 file_path,
-                f"{self.REMOTE_USER}@{self.REMOTE_HOST}:{remote_path}"
+                f"{remote_user_host}:{remote_path}"
             ]
-            subprocess.run(ssh_command, check=True)
-            self.logger.info(f"Successfully synced {file_path} using system SSH.")
+            self.logger.info(f"Starting SCP transfer for file: {file_path} to {remote_path}")
+            subprocess.run(scp_command, check=True)
+            self.logger.info(f"Successfully synced {file_path} using system SSH (scp).")
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Failed to sync {file_path} using system SSH: {e}")
+            self.logger.error(f"Failed to sync {file_path} using system SSH (scp): {e}")
+            raise  # Re-raise exception to handle retries
         except Exception as e:
-            self.logger.error(f"Unexpected error during system SSH sync of {file_path}: {e}")
+            self.logger.error(f"Unexpected error during system SSH (scp) sync of {file_path}: {e}")
+            raise  # Re-raise exception to handle retries
 
     def mkdir_p_sftp(self, sftp, remote_directory):
         """
@@ -277,6 +301,7 @@ class RemoteSync:
                     self.logger.info(f"Created remote directory: {dir}")
                 except Exception as e:
                     self.logger.error(f"Failed to create remote directory {dir}: {e}")
+                    raise  # Re-raise to handle synchronization failure
 
     def remote_sync_thread_function(self, sync_queue, stop_event):
         """
@@ -291,7 +316,7 @@ class RemoteSync:
             # Handle files in the sync_queue
             try:
                 file_to_sync = sync_queue.get(timeout=1)
-                # Perform the sync operation
+                # Perform the sync operation with retries
                 self.sync_file_to_remote(file_to_sync)
             except Empty:
                 pass
@@ -303,7 +328,7 @@ class RemoteSync:
                 try:
                     mtime = os.path.getmtime(self.aggregated_detections_file)
                     if last_aggregated_detections_mtime is None or mtime > last_aggregated_detections_mtime:
-                        # File has been modified, sync it
+                        # File has been modified, sync it with retries
                         self.sync_file_to_remote(self.aggregated_detections_file)
                         last_aggregated_detections_mtime = mtime
                 except FileNotFoundError:
@@ -321,4 +346,8 @@ class RemoteSync:
         :param file_path: Path to the file to be synced.
         """
         if self.REMOTE_SYNC_ENABLED:
-            self.remote_sync_queue.put(file_path)
+            try:
+                self.remote_sync_queue.put(file_path, timeout=5)
+                self.logger.debug(f"Enqueued file for remote sync: {file_path}")
+            except Queue.Full:
+                self.logger.error(f"Remote sync queue is full. Failed to enqueue file: {file_path}")
