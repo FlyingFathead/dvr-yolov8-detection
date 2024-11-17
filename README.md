@@ -4,7 +4,7 @@
 
 `dvr-yolov8-detection` is designed for real-time detection of humans, animals, or objects using the YOLOv8 model and OpenCV. 
 
-It supports real-time video streams via RTMP or USB webcams, includes CUDA GPU acceleration for enhanced performance, and provides options for saving detections, triggering alerts and logging events.
+The program supports real-time video streams via RTMP or USB webcams, includes CUDA GPU acceleration for enhanced performance, and provides options for saving detections, triggering alerts and logging events.
 
 The video preview can be run both in a GUI window and headless on a local web server using the included Flask web server setup.
 
@@ -14,11 +14,14 @@ The video preview can be run both in a GUI window and headless on a local web se
 
 - **Real-time human/animal/object detection and alert system**
 - Runs on **Python + YOLOv8 + OpenCV2**
-- **CUDA GPU acceleration**; also runs in CPU-only mode
-- Supports either **RTMP streams** or **USB webcams** for real-time video sources
-  - Includes a loopback example and NGINX configuration example for RTMP use (i.e. OBS Studio)
+- GUI and (headless) web server versions (`Flask`)
+- **Supports CUDA GPU acceleration**, CPU-only mode also supported
+- **RTMP streams** or **USB webcams** can be used for real-time video sources
+  - _Includes a loopback example and NGINX configuration example for RTMP use (i.e. OBS Studio)_
 - Detections can be automatically saved as images with a detection log
-- Separate tool included for **offline video file detections** (see: `utils/`)
+- Get real-time alerts on detections via **Telegram**
+- Send detection data to any remote SSH/SFTP location
+- Separate tool included for **offline video file detections** for DVR-type faster-than-realtime post-processing (see: `utils/`)
 
 ## Overview
 
