@@ -1170,7 +1170,7 @@ def index():
     <!-- Horizontal Rule and Footer with Version Number -->
     <hr>
     <footer>
-        <p>Program version: {{ version }}</p>
+        <p>version: {{ version }}</p>
     </footer>
                                   
 </body>
