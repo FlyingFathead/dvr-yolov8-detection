@@ -246,7 +246,8 @@ main_logger, detection_logger, web_server_logger, detection_log_path = setup_log
 last_log_time = time.time()
 
 # Initialize TTS engine
-tts_engine = pyttsx3.init()
+# // (we are not initializing pyttsx3 here)
+# tts_engine = pyttsx3.init()
 tts_lock = Lock()
 last_tts_time = 0
 tts_thread = None
@@ -455,36 +456,6 @@ def resize_frame(frame, target_height):
     resized_frame = cv2.resize(frame, (new_width, target_height))
     return resized_frame
 
-# Function to announce detection using a separate thread
-def announce_detection():
-    global last_tts_time
-    while not tts_stop_event.is_set():
-        current_time = time.time()
-        if current_time - last_tts_time >= TTS_COOLDOWN:
-            with tts_lock:
-                tts_engine.say("Human detected!")
-                tts_engine.runAndWait()
-            last_tts_time = current_time
-        time.sleep(1)
-
-# # Function to save detection image with date check
-# def save_detection_image(frame, detection_count):
-#     global SAVE_DIR    
-#     main_logger.info(f"Current SAVE_DIR is: {SAVE_DIR}")
-#     main_logger.info("Attempting to save detection image.")    
-#     try:
-#         # Update SAVE_DIR based on current date
-#         SAVE_DIR = get_current_save_dir()
-        
-#         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")  # Format timestamp as YYYYMMDD-HHMMSS
-#         filename = os.path.join(SAVE_DIR, f"{timestamp}_{detection_count}.{IMAGE_FORMAT}")  # Ensure SAVE_DIR already includes date subdirs
-#         if not cv2.imwrite(filename, frame):
-#             main_logger.error(f"Failed to save detection image: {filename}")
-#         else:
-#             main_logger.info(f"Saved detection image: {filename}")
-#     except Exception as e:
-#         main_logger.error(f"Error saving detection image: {e}")
-
 # Check if the CUDA denoising function is available
 def cuda_denoising_available():
     try:
@@ -602,17 +573,11 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                 full_frame_filename = None
 
                 # Queue full-frame image for saving
-                # Save full-frame image and get relative path
                 if SAVE_FULL_FRAMES:
-                    main_logger.info("Saving full-frame detection image.")
-                    try:
-                        relative_path = save_full_frame_image(denoised_frame.copy(), detection_count)
-                        if relative_path:
-                            full_frame_filename = relative_path
-                    except Exception as e:
-                        main_logger.error(f"Error during full-frame image saving: {e}")
+                    main_logger.info("Queueing full-frame detection image for saving.")
+                    image_save_queue.put((denoised_frame.copy(), detection_count, 'full_frame'))
 
-                # **Assign timestamp here**
+                # Assign timestamp here
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
                 for detection in detections:
@@ -632,25 +597,21 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                         'confidence': float(confidence)
                     }                    
 
-                    # send alerts via Telegram if enabled
-                    # alert_message = "\n".join(detection_info)
-                    # telegram_alerts.queue_alert(alert_message)
-
-                    # Construct the detection info as a dictionary
+                    # Send alerts via Telegram if enabled (ensure this function is non-blocking)
                     alert_message = {
                         "detection_count": detection_info.get('detection_count', 0),
-                        "frame_count": detection_info.get('frame_count', 0),  # Ensure this key is present
+                        "frame_count": detection_info.get('frame_count', 0),
                         "timestamp": detection_info.get('timestamp', ""),
                         "coordinates": detection_info.get('coordinates', (0, 0, 0, 0)),
                         "confidence": detection_info.get('confidence', 0.0)
                     }
 
-                    # Queue the alert message as a dictionary
-                    telegram_alerts.queue_alert(alert_message)                    
+                    # Queue the alert message
+                    telegram_alerts.queue_alert(alert_message)
 
-                    # Save detection area image and get filename
+                    # Queue detection area image for saving
                     if SAVE_DETECTION_AREAS:
-                        main_logger.info("Saving detection area image with margin.")
+                        main_logger.info("Queueing detection area image for saving.")
                         main_logger.info(f"Applying margin of {DETECTION_AREA_MARGIN} pixels to detection area.")
 
                         # Apply margin
@@ -660,19 +621,13 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                         y2_margined = min(denoised_frame.shape[0], int(y2) + DETECTION_AREA_MARGIN)
 
                         detection_area = denoised_frame[y1_margined:y2_margined, x1_margined:x2_margined]
-                        try:
-                            relative_path = save_detection_area_image(detection_area.copy(), detection_count)
-                            if relative_path:
-                                image_info['detection_area'] = relative_path
-                        except Exception as e:
-                            main_logger.error(f"Error during detection area image saving: {e}")
 
-                    # Include full-frame filename
+                        # Enqueue detection area image for saving
+                        image_save_queue.put((detection_area.copy(), detection_count, 'detection_area'))
+
+                    # Include full-frame filename (if available)
                     if full_frame_filename:
                         image_info['full_frame'] = full_frame_filename
-
-                    # Assign timestamp here
-                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
                     # Build detection_info for this detection
                     detection_info = {
@@ -686,12 +641,12 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                         'image_filenames': [image_info]  # List containing the image_info dictionary
                     }
 
-                    # for webui; record detection timestamp
+                    # For web UI; record detection timestamp
                     current_time = time.time()
                     with timestamps_lock:
                         detection_timestamps.append(current_time)
 
-                    # for webui; use appendleft to show recent detections first
+                    # For web UI; use appendleft to show recent detections first
                     with detections_lock:
                         detections_list.appendleft(detection_info)
 
@@ -703,14 +658,12 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                             cv2.putText(denoised_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                         main_logger.info(f"Rectangle drawn: {x1, y1, x2, y2} with confidence {confidence:.2f}")
 
-                # Calculate the current timestamp using the local system's timezone
-                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z%z')
-
                 # Log the detection details
                 log_detection_details(detections, total_frames, timestamp)
 
                 # Start the TTS announcement in a separate thread if not already running
                 if tts_thread is None or not tts_thread.is_alive():
+                    main_logger.info("Starting TTS thread.")                    
                     tts_stop_event.clear()
                     tts_thread = threading.Thread(target=announce_detection)
                     tts_thread.start()
@@ -730,13 +683,6 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                 if cv2.waitKey(1) & 0xFF == ord('q'):
                     stop_event.set()
                     break
-
-            # if not headless:
-            #     # Display the denoised frame
-            #     cv2.imshow('Real-time Human Detection', denoised_frame)
-            #     if cv2.waitKey(1) & 0xFF == ord('q'):
-            #         stop_event.set()
-            #         break
 
             total_frames += 1
             if time.time() - last_log_time >= 1:
@@ -863,6 +809,83 @@ def sanitize_detection_data(detection):
         'coordinates': [int(coord) for coord in detection['coordinates']],
         'confidence': float(detection['confidence'])
     }
+
+# to test that TTS is working.
+def test_tts():
+    """
+    Tests the TTS functionality by announcing a test message.
+    """
+    global tts_thread, tts_stop_event
+    
+    test_message = "Framework started, this is an audio test."
+    
+    if tts_thread is None or not tts_thread.is_alive():
+        main_logger.info("Starting TTS thread for testing.")
+        tts_stop_event.clear()
+        
+        # Define a wrapper function to announce the test message once
+        def announce_test():
+            announce_message(test_message)
+            tts_stop_event.set()  # Signal the thread to stop after the announcement
+        
+        # Start the test announcement in a separate thread
+        tts_thread = threading.Thread(target=announce_test)
+        tts_thread.start()
+        
+        # Wait for the announcement to complete
+        tts_thread.join()
+        main_logger.info("TTS thread test completed.")
+    else:
+        main_logger.warning("TTS thread is already running.")
+
+# message announcer
+def announce_message(message):
+    """
+    Initializes the TTS engine and announces the given message.
+    
+    Args:
+        message (str): The message to be spoken by the TTS engine.
+    """
+    try:
+        engine = pyttsx3.init()
+        # engine = pyttsx3.init(driverName='espeak')
+        main_logger.info(f"TTS engine initialized to announce: '{message}'")
+        
+        # Optionally, configure voice properties here
+        # Example: engine.setProperty('rate', 150)  # Speech rate
+        # Example: engine.setProperty('volume', 1.0)  # Volume (0.0 to 1.0)
+        
+        engine.say(message)
+        engine.runAndWait()
+        main_logger.info(f"TTS announcement completed: '{message}'")
+    except Exception as e:
+        main_logger.error(f"Error during TTS announcement: {e}")
+
+# Function to announce detection using a separate thread
+def announce_detection():
+    global last_tts_time
+    try:
+        # Initialize TTS engine inside the thread to avoid cross-thread issues
+        engine = pyttsx3.init()
+        # engine = pyttsx3.init(driverName='espeak')
+        main_logger.info("TTS engine initialized within announce_detection thread.")
+    except Exception as e:
+        main_logger.error(f"Failed to initialize TTS engine in announce_detection: {e}")
+        return  # Exit the function if TTS engine initialization fails
+
+    while not tts_stop_event.is_set():
+        current_time = time.time()
+        if current_time - last_tts_time >= TTS_COOLDOWN:
+            with tts_lock:
+                try:
+                    main_logger.info("Initiating TTS announcement.")
+                    engine.say("Human detected!")
+                    engine.runAndWait()
+                    main_logger.info("TTS announcement completed.")
+                except Exception as e:
+                    main_logger.error(f"Error during TTS announcement: {e}")
+            last_tts_time = current_time
+        time.sleep(1)
 
 # Main
 if __name__ == "__main__":
@@ -1036,6 +1059,9 @@ if __name__ == "__main__":
     # Register signal handler for clean exit
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+
+    # test tts
+    test_tts()
 
     # Initialize threads
     capture_thread = Thread(

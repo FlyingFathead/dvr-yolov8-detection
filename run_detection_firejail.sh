@@ -135,6 +135,8 @@ run_script() {
 
                     # Construct Firejail command
                     FIREJAIL_CMD=(firejail --noprofile)
+                    # FIREJAIL_CMD="firejail --noprofile --whitelist=/run/user/$(id -u)/pulse"
+                    # FIREJAIL_CMD="firejail --noprofile --whitelist=/dev/urandom --whitelist=/run/user/$(id -u)/pulse --whitelist=/dev/snd python "$SCRIPT_PATH" $CMDLINE_OPTS"
 
                     if [ "$ALLOW_SSH" = true ]; then
                         FIREJAIL_CMD+=(--whitelist="$SSH_BIN" --whitelist="$SCP_BIN")
@@ -146,6 +148,7 @@ run_script() {
 
                     # Execute the Firejail command
                     "${FIREJAIL_CMD[@]}"
+                    # eval "$FIREJAIL_CMD python $SCRIPT_PATH $CMDLINE_OPTS"
                     EXIT_CODE=$?
 
                     # Deactivate the environment after the script finishes
