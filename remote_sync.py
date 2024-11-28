@@ -5,7 +5,9 @@ import subprocess
 import logging
 import threading
 import time
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
+from concurrent.futures import ThreadPoolExecutor
+from configparser import NoOptionError
 
 # Check for paramiko
 try:
@@ -55,6 +57,25 @@ class RemoteSync:
         self.remote_sync_queue = Queue(maxsize=self.REMOTE_SYNC_QUEUE_MAXSIZE)
         self.remote_sync_stop_event = threading.Event()
         self.remote_sync_thread = None
+
+        # handle via thread pool executor        
+        # self.executor = ThreadPoolExecutor(max_workers=5)  # Adjust the number of workers as needed
+
+        # determine maximum number of workers for remote sync
+        # Read max_workers from config with a default fallback
+        try:
+            self.MAX_WORKERS = config.getint('remote_sync', 'max_workers')
+        except (NoOptionError, ValueError):
+            self.MAX_WORKERS = 5  # Default value if not specified or invalid
+        self.logger.info(f"Remote sync will use up to {self.MAX_WORKERS} worker threads.")
+
+        # Ensure MAX_WORKERS is a positive integer
+        if self.MAX_WORKERS <= 0:
+            self.logger.warning("max_workers must be a positive integer. Defaulting to 5.")
+            self.MAX_WORKERS = 5
+
+        # Initialize the ThreadPoolExecutor with the configured number of workers
+        self.executor = ThreadPoolExecutor(max_workers=self.MAX_WORKERS)
 
         # Handle Remote Sync Configuration
         if self.READ_REMOTE_CONFIG_FROM_ENV:
@@ -205,6 +226,9 @@ class RemoteSync:
 
         :param file_path: Path to the file to be synced.
         """
+
+        self.logger.info(f"Starting sync for {file_path} in thread {threading.current_thread().name}")
+
         attempt = 0
         while attempt < self.MAX_RETRIES:
             try:
@@ -335,17 +359,60 @@ class RemoteSync:
         :param stop_event: Event to signal the thread to stop.
         """
         last_aggregated_detections_mtime = None
+        last_queue_log_time = 0  # Initialize last log time        
 
         while not stop_event.is_set():
+            current_time = time.time()
+            # Log queue size every 10 seconds
+            if current_time - last_queue_log_time >= 10:
+                queue_size = sync_queue.qsize()
+                self.logger.info(f"Remote sync queue size: {queue_size}/{self.REMOTE_SYNC_QUEUE_MAXSIZE}")
+                last_queue_log_time = current_time
+
+            # Existing warning if queue size is high
+            queue_size = sync_queue.qsize()
+            if queue_size > self.REMOTE_SYNC_QUEUE_MAXSIZE * 0.8:
+                self.logger.warning(f"Remote sync queue size is at {queue_size}/{self.REMOTE_SYNC_QUEUE_MAXSIZE}")
+
             # Handle files in the sync_queue
             try:
                 file_to_sync = sync_queue.get(timeout=1)
-                # Perform the sync operation with retries
-                self.sync_file_to_remote(file_to_sync)
+                queue_size = sync_queue.qsize()
+                self.logger.info(f"Dequeued file for remote sync: {file_to_sync} (Queue size: {queue_size}/{self.REMOTE_SYNC_QUEUE_MAXSIZE})")
+                self.executor.submit(self.sync_file_to_remote, file_to_sync)
             except Empty:
                 pass
             except Exception as e:
                 self.logger.error(f"Error in remote_sync_thread: {e}")
+
+        # while not stop_event.is_set():
+        #     # Handle files in the sync_queue
+        #     queue_size = sync_queue.qsize()
+        #     if queue_size > self.REMOTE_SYNC_QUEUE_MAXSIZE * 0.8:
+        #         self.logger.warning(f"Remote sync queue size is at {queue_size}/{self.REMOTE_SYNC_QUEUE_MAXSIZE}")
+
+        #     # Handle files in the sync_queue
+        #     try:
+        #         file_to_sync = sync_queue.get(timeout=1)
+        #         queue_size = sync_queue.qsize()
+        #         self.logger.info(f"Dequeued file for remote sync: {file_to_sync} (Queue size: {queue_size}/{self.REMOTE_SYNC_QUEUE_MAXSIZE})")
+        #         # Perform the sync operation with retries
+        #         self.executor.submit(self.sync_file_to_remote, file_to_sync)
+        #     except Empty:
+        #         pass
+        #     except Exception as e:
+        #         self.logger.error(f"Error in remote_sync_thread: {e}")
+
+            # # Handle files in the sync_queue
+            # try:
+            #     file_to_sync = sync_queue.get(timeout=1)
+            #     # Perform the sync operation with retries
+            #     # self.sync_file_to_remote(file_to_sync)
+            #     self.executor.submit(self.sync_file_to_remote, file_to_sync)                
+            # except Empty:
+            #     pass
+            # except Exception as e:
+            #     self.logger.error(f"Error in remote_sync_thread: {e}")
 
             # Check for aggregated detections file
             if self.SYNC_AGGREGATED_DETECTIONS and self.aggregated_detections_file:
@@ -371,7 +438,9 @@ class RemoteSync:
         """
         if self.REMOTE_SYNC_ENABLED:
             try:
-                self.remote_sync_queue.put(file_path, timeout=5)
-                self.logger.debug(f"Enqueued file for remote sync: {file_path}")
-            except Queue.Full:
+                self.remote_sync_queue.put(file_path, block=False)
+                queue_size = self.remote_sync_queue.qsize()
+                self.logger.info(f"Enqueued file for remote sync: {file_path} (Queue size: {queue_size}/{self.REMOTE_SYNC_QUEUE_MAXSIZE})")
+            except Full:
                 self.logger.error(f"Remote sync queue is full. Failed to enqueue file: {file_path}")
+                raise  # Re-raise to be caught by the caller

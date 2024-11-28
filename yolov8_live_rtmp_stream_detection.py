@@ -1,9 +1,9 @@
 # yolov8_live_rtmp_stream_detection.py
-# (Updated Oct 19, 2024)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # https://github.com/FlyingFathead/dvr-yolov8-detection
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Version number
+
+# get the version number
 import version  # Import the version module
 version_number = version.version_number
 
@@ -25,7 +25,7 @@ import os
 from ultralytics import YOLO
 import threading
 from threading import Thread, Event, Lock
-from queue import Queue, Empty
+from queue import Queue, Empty, Full
 import configparser
 import argparse
 import signal
@@ -54,14 +54,6 @@ timestamps_lock = threading.Lock()
 detections_lock = threading.Lock()
 logs_lock = threading.Lock()
 
-# Initialize the image save queue and stop event
-image_save_queue = Queue()
-image_saving_stop_event = threading.Event()
-
-# Shared data structure to hold image filenames associated with detection counts
-detection_images = defaultdict(list)
-detection_images_lock = threading.Lock()
-
 # Load configuration from `config.ini` file with case-sensitive keys
 def load_config(config_path=None):
     try:
@@ -85,6 +77,10 @@ def load_config(config_path=None):
         print(f"Error loading config: {e}", flush=True)
         raise
 
+# Shared data structure to hold image filenames associated with detection counts
+detection_images = defaultdict(list)
+detection_images_lock = threading.Lock()
+
 # Load configuration
 print("Starting configuration loading...", flush=True)
 config = load_config()
@@ -103,7 +99,7 @@ FULL_FRAME_IMAGE_FORMAT = config.get('detection', 'full_frame_image_format', fal
 SAVE_DETECTION_AREAS = config.getboolean('detection', 'save_detection_areas', fallback=False)
 DETECTION_AREA_IMAGE_FORMAT = config.get('detection', 'detection_area_image_format', fallback='jpg')
 DETECTION_AREA_MARGIN = config.getint('detection', 'detection_area_margin', fallback=0)
-FRAME_QUEUE_SIZE = config.getint('performance', 'frame_queue_size', fallback=10)
+IMAGE_SAVE_QUEUE_MAXSIZE = config.getint('performance', 'IMAGE_SAVE_QUEUE_MAXSIZE', fallback=1000)
 USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
 ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var', fallback='YOLO_SAVE_DIR')
 # Extract SAVE_DIR_BASE from config.ini or set a default value
@@ -135,17 +131,22 @@ WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
 ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('webserver', 'enable_persistent_aggregated_detections', fallback=False)
 AGGREGATED_DETECTIONS_FILE = config.get('webserver', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
 
+# Initialize the image save queue and stop event
+# image_save_queue = Queue()
+image_save_queue = Queue(maxsize=IMAGE_SAVE_QUEUE_MAXSIZE)
+image_saving_stop_event = threading.Event()
+
 # Checking variables before taking off...
 if DETECTION_AREA_MARGIN < 0:
     print("DETECTION_AREA_MARGIN is negative. Setting it to 0.")
     DETECTION_AREA_MARGIN = 0
 
 # Handle Unlimited Queue Size
-if FRAME_QUEUE_SIZE <= 0:
+if IMAGE_SAVE_QUEUE_MAXSIZE <= 0:
     print("Frame queue size set to unlimited.")
-    FRAME_QUEUE_SIZE = 0  # Queue with unlimited size
+    IMAGE_SAVE_QUEUE_MAXSIZE = 0  # Queue with unlimited size
 else:
-    print(f"Frame queue size set to: {FRAME_QUEUE_SIZE}")
+    print(f"Frame saving queue maximum size set to: {IMAGE_SAVE_QUEUE_MAXSIZE}")
 
 # List handler for webUI logging
 class ListHandler(logging.Handler):
@@ -601,16 +602,23 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                 # Initialize full_frame_filename outside the loop
                 full_frame_filename = None
 
+                # # Save full-frame image and get relative path
+                # if SAVE_FULL_FRAMES:
+                #     main_logger.info("Saving full-frame detection image.")
+                #     try:
+                #         relative_path = save_full_frame_image(denoised_frame.copy(), detection_count)
+                #         if relative_path:
+                #             full_frame_filename = relative_path
+                #     except Exception as e:
+                #         main_logger.error(f"Error during full-frame image saving: {e}")
+
                 # Queue full-frame image for saving
-                # Save full-frame image and get relative path
                 if SAVE_FULL_FRAMES:
-                    main_logger.info("Saving full-frame detection image.")
+                    main_logger.info("Queuing full-frame image for saving.")
                     try:
-                        relative_path = save_full_frame_image(denoised_frame.copy(), detection_count)
-                        if relative_path:
-                            full_frame_filename = relative_path
-                    except Exception as e:
-                        main_logger.error(f"Error during full-frame image saving: {e}")
+                        image_save_queue.put((denoised_frame.copy(), detection_count, 'full_frame'), block=False)
+                    except Full:
+                        main_logger.warning("Image save queue is full. Dropping full-frame image.")
 
                 # **Assign timestamp here**
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -650,7 +658,8 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
 
                     # Save detection area image and get filename
                     if SAVE_DETECTION_AREAS:
-                        main_logger.info("Saving detection area image with margin.")
+                        # main_logger.info("Saving detection area image with margin.")
+                        main_logger.info("Queuing detection area image for saving.")
                         main_logger.info(f"Applying margin of {DETECTION_AREA_MARGIN} pixels to detection area.")
 
                         # Apply margin
@@ -660,12 +669,20 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                         y2_margined = min(denoised_frame.shape[0], int(y2) + DETECTION_AREA_MARGIN)
 
                         detection_area = denoised_frame[y1_margined:y2_margined, x1_margined:x2_margined]
+
+                        # image_save_queue.put((detection_area.copy(), detection_count, 'detection_area'))
+
                         try:
-                            relative_path = save_detection_area_image(detection_area.copy(), detection_count)
-                            if relative_path:
-                                image_info['detection_area'] = relative_path
-                        except Exception as e:
-                            main_logger.error(f"Error during detection area image saving: {e}")
+                            image_save_queue.put((detection_area.copy(), detection_count, 'detection_area'), block=False)
+                        except Full:
+                            main_logger.warning("Image save queue is full. Dropping detection area image.")                        
+
+                        # try:
+                        #     relative_path = save_detection_area_image(detection_area.copy(), detection_count)
+                        #     if relative_path:
+                        #         image_info['detection_area'] = relative_path
+                        # except Exception as e:
+                        #     main_logger.error(f"Error during detection area image saving: {e}")
 
                     # Include full-frame filename
                     if full_frame_filename:
@@ -763,18 +780,37 @@ HEADLESS = False  # Initialize globally
 def image_saving_thread_function(image_save_queue, stop_event):
     main_logger.info("Image saving thread started")
     while not stop_event.is_set() or not image_save_queue.empty():
+        # Log queue size
+        queue_size = image_save_queue.qsize()
+        if queue_size > IMAGE_SAVE_QUEUE_MAXSIZE * 0.8:
+            main_logger.warning(f"Image save queue size is at {queue_size}/{IMAGE_SAVE_QUEUE_MAXSIZE}")
+
         try:
             frame, detection_count, image_type = image_save_queue.get(timeout=1)
             main_logger.info(f"Received image to save: {image_type}, detection count: {detection_count}")
+
+            filename = None
+            filepath = None
             if image_type == 'full_frame':
-                filename = save_full_frame_image(frame, detection_count)
+                try:
+                    filepath, filename = save_full_frame_image(frame, detection_count)
+                except Exception as e:
+                    main_logger.error(f"Error during full-frame image saving: {e}")
             elif image_type == 'detection_area':
-                filename = save_detection_area_image(frame, detection_count)
+                try:
+                    filepath, filename = save_detection_area_image(frame, detection_count)
+                except Exception as e:
+                    main_logger.error(f"Error during detection area image saving: {e}")
             else:
                 main_logger.warning(f"Unknown image type: {image_type}")
-                filename = None
 
-            if filename:
+            if filepath and filename:
+                # Enqueue file for remote sync if enabled
+                if remote_sync_obj.REMOTE_SYNC_ENABLED:
+                    try:
+                        remote_sync_obj.enqueue_file(filepath)
+                    except Full:
+                        main_logger.warning(f"Remote sync queue is full. Dropping file: {filepath}")
                 with detection_images_lock:
                     detection_images[detection_count].append(filename)
         except Empty:
@@ -801,20 +837,15 @@ def save_full_frame_image(frame, detection_count):
         main_logger.info(f"Attempting to save full-frame image to {filepath}")
         if not cv2.imwrite(filepath, frame):
             main_logger.error(f"Failed to save full-frame image: {filepath}")
-            return None
+            return None, None
         else:
             main_logger.info(f"Saved full-frame image: {filepath}")
             # Compute the relative path from SAVE_DIR_BASE to the saved image
             relative_path = os.path.relpath(filepath, SAVE_DIR_BASE)
-
-            # Enqueue file for remote sync if enabled
-            if remote_sync_obj.REMOTE_SYNC_ENABLED and remote_sync_obj.SYNC_FULL_FRAME_IMAGES:
-                remote_sync_obj.enqueue_file(filepath)
-
-            return relative_path  # Return the relative path
+            return filepath, relative_path  # Return both full path and relative path
     except Exception as e:
         main_logger.error(f"Error saving full-frame image: {e}")
-        return None
+        return None, None
     
 def save_detection_area_image(frame, detection_count):
     global SAVE_DIR, SAVE_DIR_BASE
@@ -827,20 +858,15 @@ def save_detection_area_image(frame, detection_count):
         main_logger.info(f"Attempting to save detection area image to {filepath}")
         if not cv2.imwrite(filepath, frame):
             main_logger.error(f"Failed to save detection area image: {filepath}")
-            return None
+            return None, None
         else:
             main_logger.info(f"Saved detection area image: {filepath}")
             # Compute the relative path from SAVE_DIR_BASE to the saved image
             relative_path = os.path.relpath(filepath, SAVE_DIR_BASE)
-
-            # Enqueue file for remote sync if enabled
-            if remote_sync_obj.REMOTE_SYNC_ENABLED and remote_sync_obj.SYNC_DETECTION_AREA_IMAGES:
-                remote_sync_obj.enqueue_file(filepath)
-
-            return relative_path  # Return the relative path
+            return filepath, relative_path  # Return both full path and relative path
     except Exception as e:
         main_logger.error(f"Error saving detection area image: {e}")
-        return None
+        return None, None
 
 def signal_handler(sig, frame):
     main_logger.info("Interrupt received, stopping, please wait for the program to finish...")
@@ -877,7 +903,7 @@ if __name__ == "__main__":
     parser.add_argument("--full_frame_image_format", type=str, help="Image format for full-frame images (jpg or png)")
     parser.add_argument("--detection_area_image_format", type=str, help="Image format for detection area images (jpg or png)")
     parser.add_argument("--detection_area_margin", type=int, help="Margin in pixels to add around the detection area when saving images")
-    parser.add_argument("--frame_queue_size", type=int, help="Size of the frame queue. Set to 0 for unlimited size.")
+    parser.add_argument("--IMAGE_SAVE_QUEUE_MAXSIZE", type=int, help="Size of the frame queue. Set to 0 for unlimited size.")
 
     # Define other arguments without default values to allow config.ini to set them
     parser.add_argument("--headless", action='store_true', help="Run in headless mode without GUI display")
@@ -922,13 +948,13 @@ if __name__ == "__main__":
     if args.detection_area_margin is not None:
         DETECTION_AREA_MARGIN = args.detection_area_margin
     main_logger.info(f"DETECTION_AREA_MARGIN is set to: {DETECTION_AREA_MARGIN}")
-    if args.frame_queue_size is not None:
-        FRAME_QUEUE_SIZE = args.frame_queue_size
-        if FRAME_QUEUE_SIZE <= 0:
+    if args.IMAGE_SAVE_QUEUE_MAXSIZE is not None:
+        IMAGE_SAVE_QUEUE_MAXSIZE = args.IMAGE_SAVE_QUEUE_MAXSIZE
+        if IMAGE_SAVE_QUEUE_MAXSIZE <= 0:
             main_logger.info("Frame queue size set to unlimited via command-line argument.")
-            FRAME_QUEUE_SIZE = 0  # Queue with unlimited size
+            IMAGE_SAVE_QUEUE_MAXSIZE = 0  # Queue with unlimited size
         else:
-            main_logger.info(f"Frame queue size set to {FRAME_QUEUE_SIZE} via command-line argument.")
+            main_logger.info(f"Frame queue size set to {IMAGE_SAVE_QUEUE_MAXSIZE} via command-line argument.")
 
     # Override configurations based on command-line arguments
     if args.enable_webserver:
@@ -1029,7 +1055,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Initialize queues and events
-    frame_queue = Queue(maxsize=FRAME_QUEUE_SIZE)
+    frame_queue = Queue(maxsize=IMAGE_SAVE_QUEUE_MAXSIZE)
     stop_event = Event()
     detection_ongoing = Event()
 
