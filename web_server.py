@@ -329,12 +329,17 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
 
         with detections_lock:
             if detections_list:
-                # There are new detections
                 for detection in detections_list:
                     timestamp = datetime.strptime(detection['timestamp'], '%Y-%m-%d %H:%M:%S')
                     confidence = detection['confidence']
-                    image_filenames = detection.get('image_filenames', [])
-                    # logger.info(f"image_filenames from detection: {image_filenames}")
+                    image_info = detection.get('image_filenames', {})  # Should be a dict
+
+                    # Extract image filenames if they exist
+                    image_filename_entry = {}
+                    if 'full_frame' in image_info:
+                        image_filename_entry['full_frame'] = image_info['full_frame']
+                    if 'detection_area' in image_info:
+                        image_filename_entry['detection_area'] = image_info['detection_area']
 
                     if current_aggregation is None:
                         # Start a new aggregation
@@ -344,70 +349,49 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                             'latest_timestamp': timestamp,
                             'lowest_confidence': confidence,
                             'highest_confidence': confidence,
-                            'image_filenames': image_filenames.copy()
+                            'image_filenames': []
                         }
-                        # Create the summary string
-                        summary = f"👀 Human detected {current_aggregation['count']} times within {cooldown} seconds! " \
-                                  f"First seen: {current_aggregation['first_timestamp'].strftime('%Y-%m-%d %H:%M:%S')}, " \
-                                  f"Latest: {current_aggregation['latest_timestamp'].strftime('%Y-%m-%d %H:%M:%S')}, " \
-                                  f"Lowest confidence: {current_aggregation['lowest_confidence']:.2f}, " \
-                                  f"Highest confidence: {current_aggregation['highest_confidence']:.2f}"
-                        with aggregated_lock:
+                    else:
+                        # Update the ongoing aggregation
+                        current_aggregation['count'] += 1
+                        current_aggregation['latest_timestamp'] = max(current_aggregation['latest_timestamp'], timestamp)
+                        current_aggregation['lowest_confidence'] = min(current_aggregation['lowest_confidence'], confidence)
+                        current_aggregation['highest_confidence'] = max(current_aggregation['highest_confidence'], confidence)
+
+                    # Append the image filenames for this detection
+                    if image_filename_entry:
+                        # **Change Starts Here**
+                        # Instead of appending individual images, group them per detection
+                        current_aggregation['image_filenames'].append(image_filename_entry)
+
+                    # Update the summary
+                    count_display = f"<strong>{current_aggregation['count']}</strong>" if current_aggregation['count'] >= bold_threshold else f"{current_aggregation['count']}"
+                    summary = f"👀 Human detected {count_display} times within {cooldown} seconds! " \
+                              f"First seen: {current_aggregation['first_timestamp']:%Y-%m-%d %H:%M:%S}, " \
+                              f"Latest: {current_aggregation['latest_timestamp']:%Y-%m-%d %H:%M:%S}, " \
+                              f"Lowest confidence: {current_aggregation['lowest_confidence']:.2f}, " \
+                              f"Highest confidence: {current_aggregation['highest_confidence']:.2f}"
+
+                    with aggregated_lock:
+                        if aggregated_detections_list:
+                            aggregated_detections_list[0]['summary'] = summary
+                            aggregated_detections_list[0]['image_filenames'] = current_aggregation['image_filenames']
+                        else:
                             aggregated_detections_list.appendleft({
                                 'summary': summary,
                                 'image_filenames': current_aggregation['image_filenames']
                             })
-                    else:
-                        # Update the ongoing aggregation
-                        current_aggregation['count'] += 1
-                        if timestamp < current_aggregation['first_timestamp']:
-                            current_aggregation['first_timestamp'] = timestamp
-                        if timestamp > current_aggregation['latest_timestamp']:
-                            current_aggregation['latest_timestamp'] = timestamp
-                        if confidence < current_aggregation['lowest_confidence']:
-                            current_aggregation['lowest_confidence'] = confidence
-                        if confidence > current_aggregation['highest_confidence']:
-                            current_aggregation['highest_confidence'] = confidence
-                        current_aggregation['image_filenames'].extend(image_filenames)
 
-                        # Determine if count meets or exceeds the bold_threshold
-                        if current_aggregation['count'] >= bold_threshold:
-                            count_display = f"<strong>{current_aggregation['count']}</strong>"
-                        else:
-                            count_display = f"{current_aggregation['count']}"
-
-                        # Update the summary string with bolded count if applicable
-                        summary = f"👀 Human detected {count_display} times within {cooldown} seconds! " \
-                                  f"First seen: {current_aggregation['first_timestamp'].strftime('%Y-%m-%d %H:%M:%S')}, " \
-                                  f"Latest: {current_aggregation['latest_timestamp'].strftime('%Y-%m-%d %H:%M:%S')}, " \
-                                  f"Lowest confidence: {current_aggregation['lowest_confidence']:.2f}, " \
-                                  f"Highest confidence: {current_aggregation['highest_confidence']:.2f}"
-                        with aggregated_lock:
-                            if len(aggregated_detections_list) > 0:
-                                aggregated_detections_list[0]['summary'] = summary
-                                aggregated_detections_list[0]['image_filenames'] = current_aggregation['image_filenames']
-                            else:
-                                aggregated_detections_list.appendleft({
-                                    'summary': summary,
-                                    'image_filenames': current_aggregation['image_filenames']
-                                })
-
-                # Update the last_detection_time to now
                 last_detection_time = time.time()
-
-                # Clear the detections_list after processing
                 detections_list.clear()
 
-                # Save after detections if enabled
                 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
                     save_aggregated_detections()
 
         # Check if cooldown period has passed since the last detection
-        if current_aggregation and last_detection_time:
-            if (time.time() - last_detection_time) >= cooldown:
-                # Finalize the current aggregation
-                current_aggregation = None
-                last_detection_time = None
+        if current_aggregation and last_detection_time and (time.time() - last_detection_time) >= cooldown:
+            current_aggregation = None
+            last_detection_time = None
 
 @app.before_request
 def log_request_info():
@@ -894,15 +878,15 @@ def index():
         function showImage(index) {
             const imageInfo = imageFilenames[index];
             console.log('imageInfo:', imageInfo);
-            let filename;
+            let filename = null;
 
             if (showFullFrame && imageInfo.full_frame) {
                 filename = imageInfo.full_frame;
             } else if (!showFullFrame && imageInfo.detection_area) {
                 filename = imageInfo.detection_area;
-            } else if (imageInfo.full_frame) {
-                // Fallback to full_frame if detection_area is unavailable
-                filename = imageInfo.full_frame;
+            } else if (imageInfo.full_frame || imageInfo.detection_area) {
+                // Fallback to whichever image is available
+                filename = imageInfo.full_frame || imageInfo.detection_area;
             } else {
                 console.error('No valid image filename found for:', imageInfo);
                 return; // Exit the function if no valid filename

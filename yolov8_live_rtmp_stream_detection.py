@@ -96,8 +96,11 @@ STREAM_URL = config.get('stream', 'stream_url')
 DRAW_RECTANGLES = config.getboolean('detection', 'draw_rectangles')
 SAVE_FULL_FRAMES = config.getboolean('detection', 'save_full_frames', fallback=True)
 FULL_FRAME_IMAGE_FORMAT = config.get('detection', 'full_frame_image_format', fallback='jpg')
-SAVE_DETECTION_AREAS = config.getboolean('detection', 'save_detection_areas', fallback=False)
 DETECTION_AREA_IMAGE_FORMAT = config.get('detection', 'detection_area_image_format', fallback='jpg')
+IMAGE_QUALITY = config.getint('detection', 'image_quality', fallback=100)
+PNG_COMPRESSION_LEVEL = config.getint('detection', 'png_compression_level', fallback=3)
+WEBP_LOSSLESS = config.getboolean('detection', 'webp_lossless', fallback=False)
+SAVE_DETECTION_AREAS = config.getboolean('detection', 'save_detection_areas', fallback=False)
 DETECTION_AREA_MARGIN = config.getint('detection', 'detection_area_margin', fallback=0)
 IMAGE_SAVE_QUEUE_MAXSIZE = config.getint('performance', 'IMAGE_SAVE_QUEUE_MAXSIZE', fallback=1000)
 USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
@@ -135,18 +138,6 @@ AGGREGATED_DETECTIONS_FILE = config.get('webserver', 'aggregated_detections_file
 # image_save_queue = Queue()
 image_save_queue = Queue(maxsize=IMAGE_SAVE_QUEUE_MAXSIZE)
 image_saving_stop_event = threading.Event()
-
-# Checking variables before taking off...
-if DETECTION_AREA_MARGIN < 0:
-    print("DETECTION_AREA_MARGIN is negative. Setting it to 0.")
-    DETECTION_AREA_MARGIN = 0
-
-# Handle Unlimited Queue Size
-if IMAGE_SAVE_QUEUE_MAXSIZE <= 0:
-    print("Frame queue size set to unlimited.")
-    IMAGE_SAVE_QUEUE_MAXSIZE = 0  # Queue with unlimited size
-else:
-    print(f"Frame saving queue maximum size set to: {IMAGE_SAVE_QUEUE_MAXSIZE}")
 
 # List handler for webUI logging
 class ListHandler(logging.Handler):
@@ -262,6 +253,9 @@ else:
 # Initialize remote sync (if enabled)
 remote_sync_obj = remote_sync.RemoteSync(config, main_logger, SAVE_DIR_BASE, AGGREGATED_DETECTIONS_FILE)
 remote_sync_obj.start()
+
+# Specify supported image formats
+SUPPORTED_IMAGE_FORMATS = ['jpg', 'jpeg', 'png', 'webp']
 
 # Load the YOLOv8 model
 def load_model(model_variant=DEFAULT_MODEL_VARIANT):
@@ -562,216 +556,177 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
         # Create a named window with the ability to resize
         cv2.namedWindow('Real-time Human Detection', cv2.WINDOW_NORMAL)
 
-    while not stop_event.is_set() or not frame_queue.empty():
-        if not frame_queue.empty():
-            frame = frame_queue.get()
-            start_time = time.time()
+    try:
+        while not stop_event.is_set() or not frame_queue.empty():
+            if not frame_queue.empty():
+                frame = frame_queue.get()
+                start_time = time.time()
 
-            if RESCALE_INPUT:
-                resized_frame = resize_frame(frame, TARGET_HEIGHT)
-            else:
-                resized_frame = frame
+                if RESCALE_INPUT:
+                    resized_frame = resize_frame(frame, TARGET_HEIGHT)
+                else:
+                    resized_frame = frame
 
-            if denoise:
-                try:
-                    if use_cuda_denoising:
-                        gpu_frame = cv2.cuda_GpuMat()
-                        gpu_frame.upload(resized_frame)
-                        denoised_gpu = cv2.cuda.createFastNlMeansDenoisingColored(gpu_frame, None, 3, 3, 7)
-                        denoised_frame = denoised_gpu.download()
-                    else:
-                        denoised_frame = cv2.fastNlMeansDenoisingColored(resized_frame, None, 3, 3, 7, 21)
-                except cv2.error as e:
-                    main_logger.error(f"Error applying denoising: {e}")
-                    denoised_frame = resized_frame
-            else:
-                denoised_frame = resized_frame
-
-            results = model.predict(source=denoised_frame, conf=conf_threshold, classes=[0], verbose=False)
-            detections = results[0].boxes.data.cpu().numpy()
-
-            if detections.size > 0:
-                if not detecting_human:
-                    detecting_human = True
-                    detection_ongoing.set()
-                    detection_count += 1
-                    main_logger.info(f"Detections found: {detections}")
-
-                image_filenames = []
-
-                # Initialize full_frame_filename outside the loop
-                full_frame_filename = None
-
-                # # Save full-frame image and get relative path
-                # if SAVE_FULL_FRAMES:
-                #     main_logger.info("Saving full-frame detection image.")
-                #     try:
-                #         relative_path = save_full_frame_image(denoised_frame.copy(), detection_count)
-                #         if relative_path:
-                #             full_frame_filename = relative_path
-                #     except Exception as e:
-                #         main_logger.error(f"Error during full-frame image saving: {e}")
-
-                # Queue full-frame image for saving
-                if SAVE_FULL_FRAMES:
-                    main_logger.info("Queuing full-frame image for saving.")
+                if denoise:
                     try:
-                        image_save_queue.put((denoised_frame.copy(), detection_count, 'full_frame'), block=False)
-                    except Full:
-                        main_logger.warning("Image save queue is full. Dropping full-frame image.")
+                        if use_cuda_denoising:
+                            gpu_frame = cv2.cuda_GpuMat()
+                            gpu_frame.upload(resized_frame)
+                            denoised_gpu = cv2.cuda.createFastNlMeansDenoisingColored(gpu_frame, None, 3, 3, 7)
+                            denoised_frame = denoised_gpu.download()
+                        else:
+                            denoised_frame = cv2.fastNlMeansDenoisingColored(resized_frame, None, 3, 3, 7, 21)
+                    except cv2.error as e:
+                        main_logger.error(f"Error applying denoising: {e}")
+                        denoised_frame = resized_frame
+                else:
+                    denoised_frame = resized_frame
 
-                # **Assign timestamp here**
-                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                results = model.predict(source=denoised_frame, conf=conf_threshold, classes=[0], verbose=False)
+                detections = results[0].boxes.data.cpu().numpy()
 
-                for detection in detections:
-                    x1, y1, x2, y2, confidence, class_idx = detection
+                if detections.size > 0:
+                    if not detecting_human:
+                        detecting_human = True
+                        detection_ongoing.set()
+                        detection_count += 1
+                        main_logger.info(f"Detections found: {detections}")
 
-                    # Initialize the image_info dictionary for this detection
-                    image_info = {}
+                    image_filenames = []
 
-                    # Convert NumPy data types to native Python types
-                    detection_info = {
-                        'detection_count': detection_count,                        
-                        'frame_count': int(total_frames),
-                        'timestamp': timestamp,
-                        'coordinates': (
-                            int(x1), int(y1), int(x2), int(y2)
-                        ),
-                        'confidence': float(confidence)
-                    }                    
+                    # Initialize full_frame_filename outside the loop
+                    full_frame_filename = None
 
-                    # send alerts via Telegram if enabled
-                    # alert_message = "\n".join(detection_info)
-                    # telegram_alerts.queue_alert(alert_message)
-
-                    # Construct the detection info as a dictionary
-                    alert_message = {
-                        "detection_count": detection_info.get('detection_count', 0),
-                        "frame_count": detection_info.get('frame_count', 0),  # Ensure this key is present
-                        "timestamp": detection_info.get('timestamp', ""),
-                        "coordinates": detection_info.get('coordinates', (0, 0, 0, 0)),
-                        "confidence": detection_info.get('confidence', 0.0)
-                    }
-
-                    # Queue the alert message as a dictionary
-                    telegram_alerts.queue_alert(alert_message)                    
-
-                    # Save detection area image and get filename
-                    if SAVE_DETECTION_AREAS:
-                        # main_logger.info("Saving detection area image with margin.")
-                        main_logger.info("Queuing detection area image for saving.")
-                        main_logger.info(f"Applying margin of {DETECTION_AREA_MARGIN} pixels to detection area.")
-
-                        # Apply margin
-                        x1_margined = max(0, int(x1) - DETECTION_AREA_MARGIN)
-                        y1_margined = max(0, int(y1) - DETECTION_AREA_MARGIN)
-                        x2_margined = min(denoised_frame.shape[1], int(x2) + DETECTION_AREA_MARGIN)
-                        y2_margined = min(denoised_frame.shape[0], int(y2) + DETECTION_AREA_MARGIN)
-
-                        detection_area = denoised_frame[y1_margined:y2_margined, x1_margined:x2_margined]
-
-                        # image_save_queue.put((detection_area.copy(), detection_count, 'detection_area'))
-
+                    # Queue full-frame image for saving
+                    if SAVE_FULL_FRAMES:
+                        main_logger.info("Queuing full-frame image for saving.")
+                        full_frame_filename = generate_full_frame_filename(detection_count)
                         try:
-                            image_save_queue.put((detection_area.copy(), detection_count, 'detection_area'), block=False)
+                            image_save_queue.put((denoised_frame.copy(), full_frame_filename, 'full_frame'), block=False)
                         except Full:
-                            main_logger.warning("Image save queue is full. Dropping detection area image.")                        
-
-                        # try:
-                        #     relative_path = save_detection_area_image(detection_area.copy(), detection_count)
-                        #     if relative_path:
-                        #         image_info['detection_area'] = relative_path
-                        # except Exception as e:
-                        #     main_logger.error(f"Error during detection area image saving: {e}")
-
-                    # Include full-frame filename
-                    if full_frame_filename:
-                        image_info['full_frame'] = full_frame_filename
+                            main_logger.warning("Image save queue is full. Dropping full-frame image.")
+                            full_frame_filename = None
 
                     # Assign timestamp here
                     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-                    # Build detection_info for this detection
-                    detection_info = {
-                        'detection_count': detection_count,
-                        'frame_count': int(total_frames),
-                        'timestamp': timestamp,
-                        'coordinates': (
-                            int(x1), int(y1), int(x2), int(y2)
-                        ),
-                        'confidence': float(confidence),
-                        'image_filenames': [image_info]  # List containing the image_info dictionary
-                    }
+                    for detection_index, detection in enumerate(detections):
+                        x1, y1, x2, y2, confidence, class_idx = detection
 
-                    # for webui; record detection timestamp
-                    current_time = time.time()
-                    with timestamps_lock:
-                        detection_timestamps.append(current_time)
+                        # Initialize the image_info dictionary for this detection
+                        image_info = {}
 
-                    # for webui; use appendleft to show recent detections first
-                    with detections_lock:
-                        detections_list.appendleft(detection_info)
+                        # Include full-frame filename if available
+                        if full_frame_filename:
+                            image_info['full_frame'] = os.path.relpath(os.path.join(SAVE_DIR, full_frame_filename), SAVE_DIR_BASE)
 
-                    if draw_rectangles:
-                        x1, y1, x2, y2 = max(0, int(x1)), max(0, int(y1)), min(denoised_frame.shape[1], int(x2)), min(denoised_frame.shape[0], int(y2))
-                        if not headless:
-                            cv2.rectangle(denoised_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                            label = f'Person: {confidence:.2f}'
-                            cv2.putText(denoised_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                        main_logger.info(f"Rectangle drawn: {x1, y1, x2, y2} with confidence {confidence:.2f}")
+                        # Save detection area image and get filename
+                        detection_area_filename = None
+                        if SAVE_DETECTION_AREAS:
+                            main_logger.info("Queuing detection area image for saving.")
+                            main_logger.info(f"Applying margin of {DETECTION_AREA_MARGIN} pixels to detection area.")
 
-                # Calculate the current timestamp using the local system's timezone
-                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S %Z%z')
+                            # Apply margin
+                            x1_margined = max(0, int(x1) - DETECTION_AREA_MARGIN)
+                            y1_margined = max(0, int(y1) - DETECTION_AREA_MARGIN)
+                            x2_margined = min(denoised_frame.shape[1], int(x2) + DETECTION_AREA_MARGIN)
+                            y2_margined = min(denoised_frame.shape[0], int(y2) + DETECTION_AREA_MARGIN)
 
-                # Log the detection details
-                log_detection_details(detections, total_frames, timestamp)
+                            detection_area = denoised_frame[y1_margined:y2_margined, x1_margined:x2_margined]
+                            detection_area_filename = generate_detection_area_filename(detection_count, detection_index)
+                            try:
+                                image_save_queue.put((detection_area.copy(), detection_area_filename, 'detection_area'), block=False)
+                            except Full:
+                                main_logger.warning("Image save queue is full. Dropping detection area image.")
+                                detection_area_filename = None
 
-                # Start the TTS announcement in a separate thread if not already running
-                if tts_thread is None or not tts_thread.is_alive():
-                    tts_stop_event.clear()
-                    tts_thread = threading.Thread(target=announce_detection)
-                    tts_thread.start()
+                            if detection_area_filename:
+                                image_info['detection_area'] = os.path.relpath(os.path.join(SAVE_DIR, detection_area_filename), SAVE_DIR_BASE)
 
+                        # Build detection_info for this detection
+                        detection_info = {
+                            'detection_count': detection_count,
+                            'frame_count': int(total_frames),
+                            'timestamp': timestamp,
+                            'coordinates': (
+                                int(x1), int(y1), int(x2), int(y2)
+                            ),
+                            'confidence': float(confidence),
+                            'image_filenames': image_info
+                        }
+
+                        # Add detection_info to detections_list
+                        with detections_lock:
+                            detections_list.appendleft(detection_info)
+
+                        # Construct the detection info as a dictionary
+                        alert_message = {
+                            "detection_count": detection_info.get('detection_count', 0),
+                            "frame_count": detection_info.get('frame_count', 0),
+                            "timestamp": detection_info.get('timestamp', ""),
+                            "coordinates": detection_info.get('coordinates', (0, 0, 0, 0)),
+                            "confidence": detection_info.get('confidence', 0.0)
+                        }
+
+                        # Queue the alert message as a dictionary
+                        telegram_alerts.queue_alert(alert_message)
+
+                        if draw_rectangles:
+                            x1_rect, y1_rect = max(0, int(x1)), max(0, int(y1))
+                            x2_rect = min(denoised_frame.shape[1], int(x2))
+                            y2_rect = min(denoised_frame.shape[0], int(y2))
+                            if not headless:
+                                cv2.rectangle(denoised_frame, (x1_rect, y1_rect), (x2_rect, y2_rect), (0, 255, 0), 2)
+                                label = f'Person: {confidence:.2f}'
+                                cv2.putText(denoised_frame, label, (x1_rect, y1_rect - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                            main_logger.info(f"Rectangle drawn: {x1_rect}, {y1_rect}, {x2_rect}, {y2_rect} with confidence {confidence:.2f}")
+
+                    # Log the detection details
+                    log_detection_details(detections, total_frames, timestamp)
+
+                    # Start the TTS announcement in a separate thread if not already running
+                    if tts_thread is None or not tts_thread.is_alive():
+                        tts_stop_event.clear()
+                        tts_thread = threading.Thread(target=announce_detection)
+                        tts_thread.start()
+
+                else:
+                    if detecting_human:
+                        detecting_human = False
+                        detection_ongoing.clear()
+                        tts_stop_event.set()  # Stop TTS when no human is detected
+
+                if ENABLE_WEBSERVER:
+                    # Send the processed frame to the web server
+                    set_output_frame(denoised_frame)
+                elif not headless:
+                    # Display the denoised frame
+                    cv2.imshow('Real-time Human Detection', denoised_frame)
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        stop_event.set()
+                        break
+
+                total_frames += 1
+                if time.time() - last_log_time >= 1:
+                    fps = total_frames / (time.time() - last_log_time)
+                    main_logger.info(f'Processed {total_frames} frames at {fps:.2f} FPS')
+                    last_log_time = time.time()
+                    total_frames = 0
+
+                if use_process_fps:
+                    frame_time = time.time() - start_time
+                    frame_interval = 1.0 / process_fps
+                    time_to_wait = frame_interval - frame_time
+                    if time_to_wait > 0:
+                        time.sleep(time_to_wait)
             else:
-                if detecting_human:
-                    detecting_human = False
-                    detection_ongoing.clear()
-                    tts_stop_event.set()  # Stop TTS when no human is detected
-
-            if ENABLE_WEBSERVER:
-                # Send the processed frame to the web server
-                set_output_frame(denoised_frame)
-            elif not headless:
-                # Display the denoised frame
-                cv2.imshow('Real-time Human Detection', denoised_frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    stop_event.set()
-                    break
-
-            # if not headless:
-            #     # Display the denoised frame
-            #     cv2.imshow('Real-time Human Detection', denoised_frame)
-            #     if cv2.waitKey(1) & 0xFF == ord('q'):
-            #         stop_event.set()
-            #         break
-
-            total_frames += 1
-            if time.time() - last_log_time >= 1:
-                fps = total_frames / (time.time() - last_log_time)
-                main_logger.info(f'Processed {total_frames} frames at {fps:.2f} FPS')
-                last_log_time = time.time()
-                total_frames = 0
-
-            if use_process_fps:
-                frame_time = time.time() - start_time
-                frame_interval = 1.0 / process_fps
-                time_to_wait = frame_interval - frame_time
-                if time_to_wait > 0:
-                    time.sleep(time_to_wait)
-
-    tts_stop_event.set()  # Ensure TTS stops if the program is stopping
-    if not headless:
-        cv2.destroyAllWindows()
+                time.sleep(0.01)  # Sleep briefly when queue is empty to prevent high CPU usage
+    except Exception as e:
+        main_logger.error(f"Error in frame_processing_thread: {e}", exc_info=True)
+    finally:
+        tts_stop_event.set()  # Ensure TTS stops if the program is stopping
+        if not headless:
+            cv2.destroyAllWindows()
 
 # When the user wants to exit
 HEADLESS = False  # Initialize globally
@@ -786,33 +741,30 @@ def image_saving_thread_function(image_save_queue, stop_event):
             main_logger.warning(f"Image save queue size is at {queue_size}/{IMAGE_SAVE_QUEUE_MAXSIZE}")
 
         try:
-            frame, detection_count, image_type = image_save_queue.get(timeout=1)
-            main_logger.info(f"Received image to save: {image_type}, detection count: {detection_count}")
+            frame, filename, image_type = image_save_queue.get(timeout=1)
+            main_logger.info(f"Received image to save: {image_type}, filename: {filename}")
 
-            filename = None
             filepath = None
             if image_type == 'full_frame':
                 try:
-                    filepath, filename = save_full_frame_image(frame, detection_count)
+                    filepath = save_full_frame_image(frame, filename)
                 except Exception as e:
                     main_logger.error(f"Error during full-frame image saving: {e}")
             elif image_type == 'detection_area':
                 try:
-                    filepath, filename = save_detection_area_image(frame, detection_count)
+                    filepath = save_detection_area_image(frame, filename)
                 except Exception as e:
                     main_logger.error(f"Error during detection area image saving: {e}")
             else:
                 main_logger.warning(f"Unknown image type: {image_type}")
 
-            if filepath and filename:
+            if filepath:
                 # Enqueue file for remote sync if enabled
                 if remote_sync_obj.REMOTE_SYNC_ENABLED:
                     try:
                         remote_sync_obj.enqueue_file(filepath)
                     except Full:
                         main_logger.warning(f"Remote sync queue is full. Dropping file: {filepath}")
-                with detection_images_lock:
-                    detection_images[detection_count].append(filename)
         except Empty:
             continue
         except Exception as e:
@@ -826,47 +778,76 @@ image_saving_thread = threading.Thread(
 )
 image_saving_thread.start()
 
-def save_full_frame_image(frame, detection_count):
+# save full frame image
+def save_full_frame_image(frame, filename):
     global SAVE_DIR, SAVE_DIR_BASE
     try:
         SAVE_DIR = get_current_save_dir()
-        main_logger.info(f"Current SAVE_DIR is: {SAVE_DIR}")
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        filename = f"{timestamp}_{detection_count}.{FULL_FRAME_IMAGE_FORMAT}"
         filepath = os.path.join(SAVE_DIR, filename)
-        main_logger.info(f"Attempting to save full-frame image to {filepath}")
-        if not cv2.imwrite(filepath, frame):
+        main_logger.info(f"Attempting to save full-frame image to: {filepath}")
+
+        # Set image saving parameters
+        params = []
+        if FULL_FRAME_IMAGE_FORMAT.lower() in ['jpg', 'jpeg']:
+            params = [cv2.IMWRITE_JPEG_QUALITY, IMAGE_QUALITY]
+        elif FULL_FRAME_IMAGE_FORMAT.lower() == 'webp':
+            if WEBP_LOSSLESS:
+                params = [cv2.IMWRITE_WEBP_QUALITY, 101]
+            else:
+                params = [cv2.IMWRITE_WEBP_QUALITY, IMAGE_QUALITY]
+        elif FULL_FRAME_IMAGE_FORMAT.lower() == 'png':
+            params = [cv2.IMWRITE_PNG_COMPRESSION, PNG_COMPRESSION_LEVEL]
+
+        if not cv2.imwrite(filepath, frame, params):
             main_logger.error(f"Failed to save full-frame image: {filepath}")
-            return None, None
+            return None
         else:
             main_logger.info(f"Saved full-frame image: {filepath}")
-            # Compute the relative path from SAVE_DIR_BASE to the saved image
-            relative_path = os.path.relpath(filepath, SAVE_DIR_BASE)
-            return filepath, relative_path  # Return both full path and relative path
+            return filepath
     except Exception as e:
         main_logger.error(f"Error saving full-frame image: {e}")
-        return None, None
+        return None
     
-def save_detection_area_image(frame, detection_count):
+# save detection area image
+def save_detection_area_image(frame, filename):
     global SAVE_DIR, SAVE_DIR_BASE
     try:
         SAVE_DIR = get_current_save_dir()
-        main_logger.info(f"Current SAVE_DIR is: {SAVE_DIR}")
-        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        filename = f"{timestamp}_{detection_count}_area.{DETECTION_AREA_IMAGE_FORMAT}"
         filepath = os.path.join(SAVE_DIR, filename)
-        main_logger.info(f"Attempting to save detection area image to {filepath}")
-        if not cv2.imwrite(filepath, frame):
+        main_logger.info(f"Attempting to save detection area image to: {filepath}")
+
+        # Set image saving parameters
+        params = []
+        if DETECTION_AREA_IMAGE_FORMAT.lower() in ['jpg', 'jpeg']:
+            params = [cv2.IMWRITE_JPEG_QUALITY, IMAGE_QUALITY]
+        elif DETECTION_AREA_IMAGE_FORMAT.lower() == 'webp':
+            if WEBP_LOSSLESS:
+                params = [cv2.IMWRITE_WEBP_QUALITY, 101]
+            else:
+                params = [cv2.IMWRITE_WEBP_QUALITY, IMAGE_QUALITY]
+        elif DETECTION_AREA_IMAGE_FORMAT.lower() == 'png':
+            params = [cv2.IMWRITE_PNG_COMPRESSION, PNG_COMPRESSION_LEVEL]
+
+        if not cv2.imwrite(filepath, frame, params):
             main_logger.error(f"Failed to save detection area image: {filepath}")
-            return None, None
+            return None
         else:
             main_logger.info(f"Saved detection area image: {filepath}")
-            # Compute the relative path from SAVE_DIR_BASE to the saved image
-            relative_path = os.path.relpath(filepath, SAVE_DIR_BASE)
-            return filepath, relative_path  # Return both full path and relative path
+            return filepath
     except Exception as e:
         main_logger.error(f"Error saving detection area image: {e}")
-        return None, None
+        return None
+
+# helper functions for image saving
+def generate_full_frame_filename(detection_count):
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"{timestamp}_{detection_count}.{FULL_FRAME_IMAGE_FORMAT}"
+    return filename
+
+def generate_detection_area_filename(detection_count, detection_index):
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    filename = f"{timestamp}_{detection_count}_det{detection_index}.{DETECTION_AREA_IMAGE_FORMAT}"
+    return filename
 
 def signal_handler(sig, frame):
     main_logger.info("Interrupt received, stopping, please wait for the program to finish...")
@@ -904,6 +885,9 @@ if __name__ == "__main__":
     parser.add_argument("--detection_area_image_format", type=str, help="Image format for detection area images (jpg or png)")
     parser.add_argument("--detection_area_margin", type=int, help="Margin in pixels to add around the detection area when saving images")
     parser.add_argument("--IMAGE_SAVE_QUEUE_MAXSIZE", type=int, help="Size of the frame queue. Set to 0 for unlimited size.")
+    parser.add_argument("--image_quality", type=int, help="Image quality for jpg and webp formats (0-100)")
+    parser.add_argument("--webp_lossless", action='store_true', help="Enable lossless compression for WebP images")
+    parser.add_argument("--png_compression_level", type=int, help="PNG compression level (0-9)")
 
     # Define other arguments without default values to allow config.ini to set them
     parser.add_argument("--headless", action='store_true', help="Run in headless mode without GUI display")
@@ -933,6 +917,11 @@ if __name__ == "__main__":
         USE_ENV_SAVE_DIR = True
     else:
         USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
+
+    # Set saved image quality
+    if args.image_quality is not None:
+        IMAGE_QUALITY = args.image_quality
+    main_logger.info(f"Image quality is set to: {IMAGE_QUALITY}")
 
     # After parsing arguments
     if args.save_full_frames is not None:
@@ -1016,6 +1005,8 @@ if __name__ == "__main__":
         USE_PROCESS_FPS = args.use_process_fps
     if args.timeout is not None:
         TIMEOUT = args.timeout
+    if args.webp_lossless:
+        WEBP_LOSSLESS = True
 
     # Initialize web server if enabled
     if ENABLE_WEBSERVER:
@@ -1053,6 +1044,55 @@ if __name__ == "__main__":
     except RuntimeError as e:
         main_logger.error(f"Error initializing save directory: {e}")
         sys.exit(1)
+
+    # Checking variables before taking off...
+    if DETECTION_AREA_MARGIN < 0:
+        main_logger.error("DETECTION_AREA_MARGIN is negative. Setting it to 0.")
+        DETECTION_AREA_MARGIN = 0
+
+    # Handle Unlimited Queue Size
+    if IMAGE_SAVE_QUEUE_MAXSIZE <= 0:
+        main_logger.warning("Frame queue size set to unlimited. This may cause bottlenecks depending on your setup!")
+        IMAGE_SAVE_QUEUE_MAXSIZE = 0  # Queue with unlimited size
+    else:
+        main_logger.info(f"Frame saving queue maximum size set to: {IMAGE_SAVE_QUEUE_MAXSIZE}")
+
+    if FULL_FRAME_IMAGE_FORMAT.lower() not in SUPPORTED_IMAGE_FORMATS:
+        main_logger.error(f"Unsupported full-frame image format: {FULL_FRAME_IMAGE_FORMAT}. Defaulting to 'jpg'.")
+        FULL_FRAME_IMAGE_FORMAT = 'jpg'
+
+    if DETECTION_AREA_IMAGE_FORMAT.lower() not in SUPPORTED_IMAGE_FORMATS:
+        main_logger.error(f"Unsupported detection area image format: {DETECTION_AREA_IMAGE_FORMAT}. Defaulting to 'jpg'.")
+        DETECTION_AREA_IMAGE_FORMAT = 'jpg'
+
+    if args.png_compression_level is not None:
+        PNG_COMPRESSION_LEVEL = args.png_compression_level
+        main_logger.info(f"PNG compression level overridden by command-line argument: {PNG_COMPRESSION_LEVEL}")
+
+    if PNG_COMPRESSION_LEVEL < 0 or PNG_COMPRESSION_LEVEL > 9:
+        main_logger.warning("PNG compression level must be between 0 and 9. Setting to default value of 3.")
+        PNG_COMPRESSION_LEVEL = 3
+
+    if FULL_FRAME_IMAGE_FORMAT.lower() == 'png':
+        main_logger.info(f"Full-frame images will be saved as PNG with compression level {PNG_COMPRESSION_LEVEL}.")
+    if DETECTION_AREA_IMAGE_FORMAT.lower() == 'png':
+        main_logger.info(f"Detection area images will be saved as PNG with compression level {PNG_COMPRESSION_LEVEL}.")
+
+    if FULL_FRAME_IMAGE_FORMAT.lower() == 'webp' and WEBP_LOSSLESS:
+        main_logger.info("Full-frame images will be saved as lossless WebP.")
+    elif FULL_FRAME_IMAGE_FORMAT.lower() == 'webp':
+        main_logger.info(f"Full-frame images will be saved as lossy WebP with quality {IMAGE_QUALITY}.")
+
+    if DETECTION_AREA_IMAGE_FORMAT.lower() == 'webp' and WEBP_LOSSLESS:
+        main_logger.info("Detection area images will be saved as lossless WebP.")
+    elif DETECTION_AREA_IMAGE_FORMAT.lower() == 'webp':
+        main_logger.info(f"Detection area images will be saved as lossy WebP with quality {IMAGE_QUALITY}.")
+
+    main_logger.info(f"Full-frame image format: {FULL_FRAME_IMAGE_FORMAT}")
+    main_logger.info(f"Detection area image format: {DETECTION_AREA_IMAGE_FORMAT}")
+    main_logger.info(f"Image quality: {IMAGE_QUALITY}")
+    main_logger.info(f"PNG compression level is set to: {PNG_COMPRESSION_LEVEL}")    
+    main_logger.info(f"WebP lossless compression is {'enabled' if WEBP_LOSSLESS else 'disabled'}")
 
     # Initialize queues and events
     frame_queue = Queue(maxsize=IMAGE_SAVE_QUEUE_MAXSIZE)
