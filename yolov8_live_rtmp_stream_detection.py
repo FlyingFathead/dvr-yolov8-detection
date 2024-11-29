@@ -846,7 +846,8 @@ def generate_full_frame_filename(detection_count):
 
 def generate_detection_area_filename(detection_count, detection_index):
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    filename = f"{timestamp}_{detection_count}_det{detection_index}.{DETECTION_AREA_IMAGE_FORMAT}"
+    filename = f"{timestamp}_{detection_count}_area.{DETECTION_AREA_IMAGE_FORMAT}"
+    # filename = f"{timestamp}_{detection_count}_det{detection_index}.{DETECTION_AREA_IMAGE_FORMAT}"
     return filename
 
 def signal_handler(sig, frame):

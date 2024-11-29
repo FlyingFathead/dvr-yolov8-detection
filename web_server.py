@@ -106,7 +106,7 @@ if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
 # Gglobal variables for aggregation
 # aggregated_detections_list = deque(maxlen=100)  # Adjust maxlen as needed
 
-# Initialize the aggregated_detections_list
+# Initialize the aggregated_detections_list and aggregated_lock
 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
     try:
         with open(AGGREGATED_DETECTIONS_FILE, 'r') as f:
@@ -246,6 +246,7 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
         daemon=True
     )
     aggregation_thread.start()
+    logger.info("Aggregation thread started.")
 
     # Log the active configurations on startup
     logger.info("======================================================")
@@ -321,18 +322,25 @@ from collections import defaultdict
 
 # Inside aggregation_thread_function
 def aggregation_thread_function(detections_list, detections_lock, cooldown=30, bold_threshold=10):
+    global aggregated_detections_list, aggregated_lock  # Declare globals
     last_detection_time = None
     current_aggregation = None  # To track ongoing aggregation
 
     while True:
-        time.sleep(1)  # Check every second
+        try:
+            time.sleep(1)  # Check every second
 
-        with detections_lock:
-            if detections_list:
-                for detection in detections_list:
+            new_detections = []
+            with detections_lock:
+                if detections_list:
+                    new_detections.extend(detections_list)
+                    detections_list.clear()
+
+            if new_detections:
+                for detection in new_detections:
                     timestamp = datetime.strptime(detection['timestamp'], '%Y-%m-%d %H:%M:%S')
                     confidence = detection['confidence']
-                    image_info = detection.get('image_filenames', {})  # Should be a dict
+                    image_info = detection.get('image_filenames', {})
 
                     # Extract image filenames if they exist
                     image_filename_entry = {}
@@ -349,49 +357,74 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                             'latest_timestamp': timestamp,
                             'lowest_confidence': confidence,
                             'highest_confidence': confidence,
-                            'image_filenames': []
+                            'image_filenames': [image_filename_entry] if image_filename_entry else [],
+                            'finalized': False
                         }
+                        with aggregated_lock:
+                            # Prepend the current aggregation to the list
+                            aggregated_detections_list.appendleft(current_aggregation)
                     else:
                         # Update the ongoing aggregation
                         current_aggregation['count'] += 1
                         current_aggregation['latest_timestamp'] = max(current_aggregation['latest_timestamp'], timestamp)
                         current_aggregation['lowest_confidence'] = min(current_aggregation['lowest_confidence'], confidence)
                         current_aggregation['highest_confidence'] = max(current_aggregation['highest_confidence'], confidence)
+                        if image_filename_entry:
+                            current_aggregation['image_filenames'].append(image_filename_entry)
 
-                    # Append the image filenames for this detection
-                    if image_filename_entry:
-                        # **Change Starts Here**
-                        # Instead of appending individual images, group them per detection
-                        current_aggregation['image_filenames'].append(image_filename_entry)
+                    last_detection_time = time.time()
 
-                    # Update the summary
-                    count_display = f"<strong>{current_aggregation['count']}</strong>" if current_aggregation['count'] >= bold_threshold else f"{current_aggregation['count']}"
-                    summary = f"👀 Human detected {count_display} times within {cooldown} seconds! " \
-                              f"First seen: {current_aggregation['first_timestamp']:%Y-%m-%d %H:%M:%S}, " \
-                              f"Latest: {current_aggregation['latest_timestamp']:%Y-%m-%d %H:%M:%S}, " \
-                              f"Lowest confidence: {current_aggregation['lowest_confidence']:.2f}, " \
-                              f"Highest confidence: {current_aggregation['highest_confidence']:.2f}"
-
-                    with aggregated_lock:
-                        if aggregated_detections_list:
-                            aggregated_detections_list[0]['summary'] = summary
-                            aggregated_detections_list[0]['image_filenames'] = current_aggregation['image_filenames']
-                        else:
-                            aggregated_detections_list.appendleft({
-                                'summary': summary,
-                                'image_filenames': current_aggregation['image_filenames']
-                            })
-
-                last_detection_time = time.time()
-                detections_list.clear()
+                # Update the summary of the current aggregation
+                update_aggregation_summary(current_aggregation, cooldown, bold_threshold)
 
                 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
                     save_aggregated_detections()
 
-        # Check if cooldown period has passed since the last detection
-        if current_aggregation and last_detection_time and (time.time() - last_detection_time) >= cooldown:
-            current_aggregation = None
-            last_detection_time = None
+            # Check if cooldown period has passed since the last detection
+            if current_aggregation and last_detection_time and (time.time() - last_detection_time) >= cooldown:
+                # Mark current aggregation as finalized
+                current_aggregation['finalized'] = True
+                current_aggregation = None
+                last_detection_time = None
+
+                if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
+                    save_aggregated_detections()
+
+        except Exception as e:
+            logger.error(f"Error in aggregation_thread_function: {e}", exc_info=True)
+
+def update_aggregation_summary(current_aggregation, cooldown, bold_threshold):
+    count_display = f"<strong>{current_aggregation['count']}</strong>" if current_aggregation['count'] >= bold_threshold else f"{current_aggregation['count']}"
+    summary = (
+        f"👀 Human detected {count_display} times within {cooldown} seconds! "
+        f"First seen: {current_aggregation['first_timestamp']:%Y-%m-%d %H:%M:%S}, "
+        f"Latest: {current_aggregation['latest_timestamp']:%Y-%m-%d %H:%M:%S}, "
+        f"Lowest confidence: {current_aggregation['lowest_confidence']:.2f}, "
+        f"Highest confidence: {current_aggregation['highest_confidence']:.2f}"
+    )
+    current_aggregation['summary'] = summary
+
+def finalize_aggregation(current_aggregation, cooldown, bold_threshold):
+    global aggregated_detections_list, aggregated_lock  # Declare globals
+    count_display = f"<strong>{current_aggregation['count']}</strong>" if current_aggregation['count'] >= bold_threshold else f"{current_aggregation['count']}"
+    summary = (
+        f"👀 Human detected {count_display} times within {cooldown} seconds! "
+        f"First seen: {current_aggregation['first_timestamp']:%Y-%m-%d %H:%M:%S}, "
+        f"Latest: {current_aggregation['latest_timestamp']:%Y-%m-%d %H:%M:%S}, "
+        f"Lowest confidence: {current_aggregation['lowest_confidence']:.2f}, "
+        f"Highest confidence: {current_aggregation['highest_confidence']:.2f}"
+    )
+
+    with aggregated_lock:
+        # Prepend the finalized aggregation to the list
+        aggregated_detections_list.appendleft({
+            'summary': summary,
+            'image_filenames': current_aggregation['image_filenames']
+        })
+    logger.info("Aggregation finalized and added to the list.")
+
+    if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
+        save_aggregated_detections()
 
 @app.before_request
 def log_request_info():
@@ -787,6 +820,9 @@ def index():
         {% for detection in detections %}
             <li>
                 {{ detection.summary | safe }}
+                {% if not detection.finalized %}
+                    <em>(Ongoing)</em>
+                {% endif %}
                 {% if detection.image_filenames %}
                     - <a href="#" onclick="showImages({{ detection.image_filenames | tojson }}); return false;">View Images</a>
                 {% endif %}
@@ -1112,7 +1148,7 @@ def index():
         setInterval(() => {
             fetchDetections();
             fetchLogs();
-        }, 5000); // 5000 milliseconds = 5 seconds
+        }, 1000); // 5000 milliseconds = 5 seconds
 
         // Also fetch current time every second for real-time update
         setInterval(() => {
