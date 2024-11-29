@@ -10,6 +10,7 @@ version_number = version.version_number
 import sys
 import os
 import signal
+import shutil
 
 from collections import deque
 from datetime import datetime
@@ -30,7 +31,7 @@ logger = logging.getLogger('web_server')
 logger.setLevel(logging.INFO)
 # Prevent messages from propagating to the root logger
 logger.propagate = False
-
+# init flask
 app = Flask(__name__)
 
 # Flask proxy fix
@@ -97,8 +98,8 @@ WEBUI_BOLD_THRESHOLD = config.getint('webui', 'webui_bold_threshold', fallback=1
 interval_checks = config.getboolean('webserver', 'interval_checks', fallback=True)
 check_interval = config.getint('webserver', 'check_interval', fallback=10)
 # Persistent aggregated detections
-ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('webserver', 'enable_persistent_aggregated_detections', fallback=False)
-AGGREGATED_DETECTIONS_FILE = config.get('webserver', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
+ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('aggregation', 'enable_persistent_aggregated_detections', fallback=False)
+AGGREGATED_DETECTIONS_FILE = config.get('aggregation', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
 
 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
     logger.info(f"Persistent aggregated detections enabled. Logging to file: {AGGREGATED_DETECTIONS_FILE}")
@@ -131,15 +132,42 @@ connected_clients = {}
 # Initialize the lock for connected_clients
 connected_clients_lock = threading.Lock()
 
-# save aggregated detections if enabled
+# rotate aggregated files
+def rotate_aggregated_files():
+    """Rotates the aggregated detections files when they exceed the max size."""
+    base_file = AGGREGATED_DETECTIONS_FILE
+    keep_old = config.getboolean('aggregation', 'keep_old_aggregations', fallback=True)
+    max_old = config.getint('aggregation', 'max_old_aggregations', fallback=5)
+
+    if not keep_old:
+        os.remove(base_file)
+        logger.info("Old aggregated detections file removed.")
+        return
+
+    # Rotate files
+    for i in range(max_old, 0, -1):
+        old_file = f"{base_file}.{i}"
+        if os.path.exists(old_file):
+            if i == max_old:
+                os.remove(old_file)
+            else:
+                new_file = f"{base_file}.{i+1}"
+                os.rename(old_file, new_file)
+    # Rename the current file to .1
+    if os.path.exists(base_file):
+        os.rename(base_file, f"{base_file}.1")
+    logger.info("Aggregated detections file rotated.")
+
+# Save aggregated detections if enabled
 def save_aggregated_detections():
     """Saves the aggregated detections to a JSON file."""
     if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
         with aggregated_lock:
             data = list(aggregated_detections_list)
         try:
+            # Write the data to the aggregated detections file
             with open(AGGREGATED_DETECTIONS_FILE, 'w') as f:
-                json.dump(data, f, default=str)  # Use default=str to handle any non-serializable data
+                json.dump(data, f, default=str)
             logger.info("Aggregated detections saved to persistent storage.")
         except Exception as e:
             logger.error(f"Error saving aggregated detections to file: {e}")
@@ -216,6 +244,8 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
                      detections_list=None, logs_list=None, detections_lock=None,
                      logs_lock=None, config=None, save_dir_base=None):
     """Starts the Flask web server."""
+
+    app.config['config'] = config  # Store config in Flask's config if needed
 
     # Initialize SAVE_DIR_BASE within the web server process
     SAVE_DIR_BASE = get_base_save_dir(config)
@@ -541,9 +571,15 @@ def video_feed():
 # get aggregated detections rather than flood the webui
 @app.route('/api/detections')
 def get_detections():
+    # Read max_entries from config.ini with a fallback to 100
+    max_entries = config.getint('aggregation', 'webui_max_aggregation_entries', fallback=100)
     with aggregated_lock:
-        aggregated_detections = list(aggregated_detections_list)
-    return jsonify(aggregated_detections)
+        aggregated_detections = list(aggregated_detections_list)[:max_entries]
+    response = jsonify(aggregated_detections)
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 # // (old method)
 # @app.route('/api/detections')

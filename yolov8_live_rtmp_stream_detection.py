@@ -131,8 +131,12 @@ WEBSERVER_HOST = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
 WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
 
 # Read AGGREGATED_DETECTIONS_FILE from config for remote sync
-ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('webserver', 'enable_persistent_aggregated_detections', fallback=False)
-AGGREGATED_DETECTIONS_FILE = config.get('webserver', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
+ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('aggregation', 'enable_persistent_aggregated_detections', fallback=False)
+AGGREGATED_DETECTIONS_FILE = config.get('aggregation', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
+
+
+webui_max_aggregation_entries = 100
+
 
 # Initialize the image save queue and stop event
 # image_save_queue = Queue()
