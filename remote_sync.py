@@ -58,6 +58,10 @@ class RemoteSync:
         self.remote_sync_stop_event = threading.Event()
         self.remote_sync_thread = None
 
+        # Batch Interval Configuration
+        self.BATCH_INTERVAL = config.getfloat('remote_sync', 'batch_interval', fallback=0)
+        self.logger.info(f"[NOT IN USE] Remote sync batch interval set to {self.BATCH_INTERVAL} seconds.")
+
         # handle via thread pool executor        
         # self.executor = ThreadPoolExecutor(max_workers=5)  # Adjust the number of workers as needed
 
