@@ -248,8 +248,19 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
     app.config['config'] = config  # Store config in Flask's config if needed
 
     # Initialize SAVE_DIR_BASE within the web server process
-    SAVE_DIR_BASE = get_base_save_dir(config)
+    # SAVE_DIR_BASE = get_base_save_dir(config)
+    # app.config['SAVE_DIR_BASE'] = SAVE_DIR_BASE
+
+    if save_dir_base:
+        SAVE_DIR_BASE = save_dir_base
+        logger.info(f"Using SAVE_DIR_BASE passed from detection script: {SAVE_DIR_BASE}")
+    else:
+        # Initialize SAVE_DIR_BASE within the web server process
+        SAVE_DIR_BASE = get_base_save_dir(config)
+        logger.info(f"Initialized SAVE_DIR_BASE within web server: {SAVE_DIR_BASE}")
+
     app.config['SAVE_DIR_BASE'] = SAVE_DIR_BASE
+
     logger.info(f"SAVE_DIR_BASE is set to: {app.config['SAVE_DIR_BASE']}")
     
     logger.info(f"Starting web server at http://{host}:{port}")
@@ -526,6 +537,7 @@ def serve_detection_image(filename):
     # Use os.path.join and os.path.abspath
     filepath = os.path.abspath(os.path.join(save_dir_base, filename))
     logger.info(f"Computed filepath: {filepath}")
+
     # Security check to prevent directory traversal
     if not save_dir_base:
         logger.error("save_dir_base is None. Cannot serve image.")

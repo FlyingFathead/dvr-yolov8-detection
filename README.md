@@ -270,7 +270,7 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 
 ## Changelog
 - **v0.1614**
-  - More reactive log updates to webui
+  - More reactive detection aggregation updates to webui
 - **v0.1613**
   - Even more load balancing fixes; aggregation parsing improvements
 - **v0.1612**

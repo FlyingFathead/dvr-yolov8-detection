@@ -1026,7 +1026,8 @@ if __name__ == "__main__":
                 logs_list,             # logs_list
                 detections_lock,       # detections_lock
                 logs_lock,             # logs_lock
-                config                 # config
+                config,                 # config
+                SAVE_DIR_BASE          # Pass SAVE_DIR_BASE explicitly                
                 # detection_timestamps,  # Pass detection_timestamps
                 # timestamps_lock        # Pass timestamps_lock
             ),
