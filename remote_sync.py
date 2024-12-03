@@ -52,6 +52,12 @@ class RemoteSync:
         self.MAX_RETRIES = config.getint('remote_sync', 'max_retries', fallback=3)
         self.RETRY_DELAY = config.getint('remote_sync', 'retry_delay', fallback=5)
 
+        # **Batch Processing Configuration**
+        self.BATCH_SIZE = config.getint('remote_sync', 'batch_size', fallback=10)
+        self.BATCH_TIME = config.getint('remote_sync', 'batch_time', fallback=5)
+
+        self.logger.info(f"Batch processing enabled with batch size: {self.BATCH_SIZE} and batch time: {self.BATCH_TIME} seconds.")
+
         # Queue Configuration
         self.REMOTE_SYNC_QUEUE_MAXSIZE = config.getint('remote_sync', 'remote_sync_queue_maxsize', fallback=1000)
         self.remote_sync_queue = Queue(maxsize=self.REMOTE_SYNC_QUEUE_MAXSIZE)

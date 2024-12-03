@@ -614,6 +614,9 @@ def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectan
                     # Assign timestamp here
                     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+                    # Update SAVE_DIR to the current date-based directory
+                    SAVE_DIR = get_current_save_dir()
+
                     for detection_index, detection in enumerate(detections):
                         x1, y1, x2, y2, confidence, class_idx = detection
 
