@@ -135,6 +135,7 @@ run_script() {
 
                     # Construct Firejail command
                     FIREJAIL_CMD=(firejail --noprofile)
+
                     # FIREJAIL_CMD="firejail --noprofile --whitelist=/run/user/$(id -u)/pulse"
                     # FIREJAIL_CMD="firejail --noprofile --whitelist=/dev/urandom --whitelist=/run/user/$(id -u)/pulse --whitelist=/dev/snd python "$SCRIPT_PATH" $CMDLINE_OPTS"
 

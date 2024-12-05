@@ -1,4 +1,4 @@
 yolov8_live_rtmp_stream_detection.py
 config.ini
-remote_sync.py
-# web_server.py
+# remote_sync.py
+web_server.py
