@@ -269,6 +269,8 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1614.3**
+  - preferred CUDA device can now be selected under `[hardware]` from `config.ini`
 - **v0.1614**
   - More reactive detection aggregation updates to webui
 - **v0.1613**

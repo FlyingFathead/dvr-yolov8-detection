@@ -263,15 +263,47 @@ SUPPORTED_IMAGE_FORMATS = ['jpg', 'jpeg', 'png', 'webp']
 
 # Load the YOLOv8 model
 def load_model(model_variant=DEFAULT_MODEL_VARIANT):
+    """Loads the YOLO model and puts it onto the configured CUDA device (or CPU)."""
     try:
         model = YOLO(model_variant)
-        # Check if CUDA is available
+
+        # 1) Read from config
+        cuda_device_id = config.getint('hardware', 'cuda_device_id', fallback=0)
+        cuda_fallback_if_unavailable = config.getboolean('hardware', 'cuda_fallback_if_unavailable', fallback=True)
+
         if torch.cuda.is_available():
-            model.to('cuda')
-            main_logger.info("Using CUDA for model inference.")
+            # 2) Check how many devices we have
+            num_gpus = torch.cuda.device_count()
+
+            if cuda_device_id < num_gpus:
+                try:
+                    # Attempt to put the model on the user-specified device
+                    device_str = f"cuda:{cuda_device_id}"
+                    model.to(device_str)
+                    main_logger.info(f"Using CUDA device {cuda_device_id} for model inference.")
+                except Exception as e:
+                    main_logger.error(f"Failed to load model on cuda:{cuda_device_id}: {e}")
+                    if cuda_fallback_if_unavailable and num_gpus > 0:
+                        # Attempt fallback on the first available GPU (usually cuda:0)
+                        main_logger.warning("Falling back to cuda:0")
+                        model.to("cuda:0")
+                    else:
+                        main_logger.warning("No fallback GPU or fallback disabled. Using CPU instead.")
+                        model.to('cpu')
+            else:
+                # The user-specified device doesn't exist
+                main_logger.warning(f"Requested cuda:{cuda_device_id}, but only {num_gpus} GPU(s) found.")
+                if cuda_fallback_if_unavailable and num_gpus > 0:
+                    main_logger.warning("Falling back to cuda:0")
+                    model.to("cuda:0")
+                else:
+                    main_logger.warning("No fallback GPU or fallback disabled. Using CPU instead.")
+                    model.to('cpu')
         else:
-            model.to('cpu')
+            # No GPU present at all
             main_logger.warning("CUDA not available, using CPU for model inference.")
+            model.to('cpu')
+
         return model
     except Exception as e:
         logging.error(f"Error loading model {model_variant}: {e}")
@@ -297,10 +329,11 @@ def log_cuda_info():
         logging.info(f"  Compute Capability: {gpu_capability[0]}.{gpu_capability[1]}")
         logging.info(f"  Total Memory: {gpu_memory:.2f} GB")
 
-    # Log the current device being used
-    current_device = torch.cuda.current_device()
-    current_gpu_name = torch.cuda.get_device_name(current_device)
-    logging.info(f"Using CUDA Device {current_device}: {current_gpu_name}")
+    # // not in use after 0.1614.3, preferred CUDA device is now set in `config.ini`
+    # Log the current device being used 
+    # current_device = torch.cuda.current_device()
+    # current_gpu_name = torch.cuda.get_device_name(current_device)    
+    # logging.info(f"Using CUDA Device {current_device}: {current_gpu_name}")
 
 # Function to get the base save directory (without date subdirs)
 def get_base_save_dir():
