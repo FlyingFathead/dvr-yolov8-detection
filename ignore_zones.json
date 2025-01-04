@@ -1,0 +1,12 @@
+{
+    "ignore_zones": [
+        {
+            "name": "tree",
+            "confidence_threshold": 0.8,
+            "x1": 702,
+            "y1": 420,
+            "x2": 724,
+            "y2": 585
+        }
+    ]
+}
