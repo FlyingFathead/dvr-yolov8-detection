@@ -8,6 +8,8 @@ import sys
 import configparser
 import logging
 
+from pathlib import Path
+
 # --------------------------
 # Default fallback settings:
 # --------------------------
@@ -28,8 +30,8 @@ display_width = None
 display_height = None
 
 drawing = False
-ix, iy = -1, -1  # mouse-down coordinates (in *display* coords)
-temp_rect = None  # rectangle while dragging (in *display* coords)
+ix, iy = -1, -1  # mouse-down coordinates (in display coords)
+temp_rect = None  # rectangle while dragging (in display coords)
 
 # ------------------------------------------------------------------------------
 # Logger setup
@@ -66,19 +68,16 @@ def load_config():
 
 # ------------------------------------------------------------------------------
 # Scale the frame if it's larger than our max display size
-# Returns the scaled frame, plus the new width/height
 # ------------------------------------------------------------------------------
 def scale_frame_if_needed(frame):
+    """Returns a possibly downscaled copy for display, sets global width/height."""
     global original_width, original_height, display_width, display_height
 
     original_height, original_width = frame.shape[:2]
-
-    # By default, display_width/height = original
     display_width = original_width
     display_height = original_height
 
     if display_width > MAX_DISPLAY_WIDTH or display_height > MAX_DISPLAY_HEIGHT:
-        # compute scale factors
         scale_w = MAX_DISPLAY_WIDTH / float(display_width)
         scale_h = MAX_DISPLAY_HEIGHT / float(display_height)
         scale = min(scale_w, scale_h)
@@ -96,81 +95,79 @@ def scale_frame_if_needed(frame):
 # Convert display coords -> original coords
 # ------------------------------------------------------------------------------
 def to_original_coords(x_disp, y_disp):
-    """
-    Given a coordinate (x_disp, y_disp) in the *display* (possibly scaled),
-    return the corresponding coordinate in the *original* frame dimension.
-    """
+    """Given (x_disp,y_disp) in the display, return the corresponding original coords."""
     if display_width == original_width and display_height == original_height:
-        # No scaling was done, so they are the same
         return x_disp, y_disp
-
-    # Otherwise, we figure out the scaling ratio
     scale_x = original_width / float(display_width)
     scale_y = original_height / float(display_height)
-    x_orig = int(x_disp * scale_x)
-    y_orig = int(y_disp * scale_y)
-    return x_orig, y_orig
+    return int(x_disp * scale_x), int(y_disp * scale_y)
 
 # ------------------------------------------------------------------------------
 # Convert original coords -> display coords
 # ------------------------------------------------------------------------------
 def to_display_coords(x_orig, y_orig):
-    """
-    Opposite of above: given a coordinate in the original dimension,
-    return its coordinate in the display dimension.
-    """
+    """Given (x_orig,y_orig) in the original, return the corresponding display coords."""
     if display_width == original_width and display_height == original_height:
         return x_orig, y_orig
-
     scale_x = display_width / float(original_width)
     scale_y = display_height / float(original_height)
-    x_disp = int(x_orig * scale_x)
-    y_disp = int(y_orig * scale_y)
-    return x_disp, y_disp
+    return int(x_orig * scale_x), int(y_orig * scale_y)
 
 # ------------------------------------------------------------------------------
-# Mouse callback for drawing rectangles
+# Save zones to output JSON
+# ------------------------------------------------------------------------------
+def save_zones_to_json(output_json):
+    """Writes current `zones` to a JSON file, creating/overwriting it."""
+    dir_path = Path(output_json).parent
+    if dir_path and not dir_path.exists():
+        logger.info(f"Output directory '{dir_path}' does not exist; attempting to create it.")
+        try:
+            dir_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Unable to create directory '{dir_path}': {e}")
+            sys.exit("Error: cannot create output directory. Please fix config.ini or your path.")
+
+    logger.info(f"Saving zones to {output_json} ...")
+    with open(output_json, 'w') as f:
+        json.dump({"ignore_zones": zones}, f, indent=4)
+    logger.info("Zones saved successfully.")
+
+# ------------------------------------------------------------------------------
+# Mouse callback
 # ------------------------------------------------------------------------------
 def draw_rectangles(event, x_disp, y_disp, flags, param):
     global ix, iy, drawing, temp_rect
 
-    # (x_disp, y_disp) are the coordinates in the *display* image
     if event == cv2.EVENT_LBUTTONDOWN:
         drawing = True
         ix, iy = x_disp, y_disp
         temp_rect = None
 
     elif event == cv2.EVENT_MOUSEMOVE and drawing:
-        # Update the green "live" rectangle (in display coords)
         temp_rect = (ix, iy, x_disp, y_disp)
 
     elif event == cv2.EVENT_LBUTTONUP:
         drawing = False
         if temp_rect:
             x1_disp, y1_disp, x2_disp, y2_disp = temp_rect
-
-            # Normalize *display* coords
+            # Normalize
             x1_disp, x2_disp = sorted([x1_disp, x2_disp])
             y1_disp, y2_disp = sorted([y1_disp, y2_disp])
 
-            # Convert them back to *original* coords before storing
+            # Convert to original coords
             x1_orig, y1_orig = to_original_coords(x1_disp, y1_disp)
             x2_orig, y2_orig = to_original_coords(x2_disp, y2_disp)
 
-            # --- PROMPT user in terminal for zone name ---
+            # Prompt for zone name
             default_name = f"Zone_{len(zones) + 1}"
-            zone_name = input(
-                f"Enter zone name (press Enter for '{default_name}'): "
-            ).strip()
+            zone_name = input(f"Enter zone name (press Enter for '{default_name}'): ").strip()
             if not zone_name:
                 zone_name = default_name
 
-            # --- PROMPT user for confidence threshold ---
+            # Prompt for confidence
             while True:
-                confidence_str = input(
-                    "Enter min confidence threshold (0.0–1.0, press Enter = 0.0): "
-                ).strip()
-                if not confidence_str:  # user just pressed Enter
+                confidence_str = input("Enter min confidence threshold (0.0–1.0, Enter=0.0): ").strip()
+                if not confidence_str:
                     zone_conf = 0.0
                     break
                 try:
@@ -182,21 +179,21 @@ def draw_rectangles(event, x_disp, y_disp, flags, param):
                 except ValueError:
                     print("Invalid input, please enter a numeric value.")
 
+            # Add zone
             zones.append({
                 "name": zone_name,
                 "confidence_threshold": zone_conf,
-                # Store in *original* coords:
-                "x1": x1_orig,
-                "y1": y1_orig,
-                "x2": x2_orig,
-                "y2": y2_orig
+                "x1": x1_orig, "y1": y1_orig,
+                "x2": x2_orig, "y2": y2_orig
             })
+            logger.info(f"Added zone '{zone_name}' w/conf={zone_conf}, "
+                        f"orig=({x1_orig},{y1_orig})-({x2_orig},{y2_orig}), "
+                        f"display=({x1_disp},{y1_disp})-({x2_disp},{y2_disp})")
 
-            logger.info(
-                f"Added zone '{zone_name}' w/conf={zone_conf}, "
-                f"orig coords=({x1_orig},{y1_orig}) - ({x2_orig},{y2_orig}), "
-                f"display coords=({x1_disp},{y1_disp}) - ({x2_disp},{y2_disp})"
-            )
+            # Prompt to save immediately
+            ans = input("Would you like to SAVE the zones now? (y/N) ").strip().lower()
+            if ans == 'y':
+                save_zones_to_json(param["output_json"])
 
         temp_rect = None
 
@@ -206,36 +203,40 @@ def draw_rectangles(event, x_disp, y_disp, flags, param):
 def main():
     video_source, output_json = load_config()
 
-    # --------------------------------------------------------------------------
-    # Check if there's an existing JSON file with ignore_zones
-    # --------------------------------------------------------------------------
+    # 1) Ensure directory for output_json is creatable
+    dir_path = Path(output_json).parent
+    if dir_path and not dir_path.exists():
+        logger.info(f"Output directory '{dir_path}' does not exist; attempting to create it.")
+        try:
+            dir_path.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.error(f"Unable to create directory '{dir_path}': {e}")
+            sys.exit("Error: cannot create output directory. Please fix config.ini or your path.")
+
+    # 2) If output file exists, load existing zones
     if os.path.exists(output_json):
         logger.info(f"Found existing JSON file: {output_json}, attempting to load.")
         try:
             with open(output_json, 'r') as f:
                 data = json.load(f)
             loaded_zones = data.get("ignore_zones", [])
-            zones.extend(loaded_zones)  # Add them to our global 'zones' list
+            zones.extend(loaded_zones)
             logger.info(f"Loaded {len(loaded_zones)} zones from {output_json}.")
             for i, z in enumerate(loaded_zones, 1):
                 name = z.get("name", f"Zone_{i}")
-                cthr = z.get("confidence_threshold", 0.0)  # fallback if missing
+                cthr = z.get("confidence_threshold", 0.0)
                 x1 = z.get("x1", 0)
                 y1 = z.get("y1", 0)
                 x2 = z.get("x2", 0)
                 y2 = z.get("y2", 0)
-                logger.info(
-                    f"  -> Zone {i}: name='{name}', threshold={cthr}, coords=({x1},{y1}) - ({x2},{y2})"
-                )
+                logger.info(f"  -> Zone {i}: '{name}', threshold={cthr}, coords=({x1},{y1})-({x2},{y2})")
         except Exception as e:
             logger.error(f"Failed to parse JSON from {output_json}: {e}")
             logger.info("Continuing with an empty zones list.")
     else:
-        logger.info(f"No existing JSON file found at '{output_json}'. Starting with an empty zones list.")
+        logger.info(f"No existing JSON file found at '{output_json}'. Starting with empty list.")
 
-    # --------------------------------------------------------------------------
-    # Now open the stream and proceed
-    # --------------------------------------------------------------------------
+    # 3) Open the stream
     cap = cv2.VideoCapture(video_source)
     if not cap.isOpened():
         logger.error(f"Could not open video source: {video_source}")
@@ -247,65 +248,55 @@ def main():
         logger.error("Could not read a frame from the stream.")
         return
 
-    # Possibly scale down the frame for display
+    # 4) Possibly scale it for display
     frame_display = scale_frame_if_needed(frame)
 
+    # 5) Setup window + callback
     cv2.namedWindow("Draw Ignore Zones", cv2.WINDOW_NORMAL)
-    cv2.setMouseCallback("Draw Ignore Zones", draw_rectangles)
+    cv2.setMouseCallback("Draw Ignore Zones", draw_rectangles, param={"output_json": output_json})
 
+    # 6) Main loop
     while True:
         display_frame = frame_display.copy()
 
-        # Draw existing zones in red (convert their *original* coords to display coords)
+        # Draw existing zones in red
         for z in zones:
-            x1_orig, y1_orig = z.get("x1", 0), z.get("y1", 0)
-            x2_orig, y2_orig = z.get("x2", 0), z.get("y2", 0)
-
-            # Convert original -> display
-            x1_disp, y1_disp = to_display_coords(x1_orig, y1_orig)
-            x2_disp, y2_disp = to_display_coords(x2_orig, y2_orig)
-
-            cv2.rectangle(display_frame, (x1_disp, y1_disp), (x2_disp, y2_disp), (0, 0, 255), 2)
-
-            name = z.get('name', 'Zone_?')
-            cthr = z.get('confidence_threshold', 0.0)
+            x1o, y1o = z.get("x1", 0), z.get("y1", 0)
+            x2o, y2o = z.get("x2", 0), z.get("y2", 0)
+            x1d, y1d = to_display_coords(x1o, y1o)
+            x2d, y2d = to_display_coords(x2o, y2o)
+            cv2.rectangle(display_frame, (x1d, y1d), (x2d, y2d), (0, 0, 255), 2)
+            name = z.get("name", "?")
+            cthr = z.get("confidence_threshold", 0.0)
             label = f"{name} ({cthr})"
-            # Place the label above or below this box as needed
-            label_y = y1_disp - 5 if (y1_disp - 10) > 0 else y1_disp + 15
-            cv2.putText(
-                display_frame,
-                label,
-                (x1_disp, label_y),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (255, 255, 255),
-                2
-            )
+            label_y = y1d - 5 if (y1d - 10) > 0 else y1d + 15
+            cv2.putText(display_frame, label, (x1d, label_y),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
 
-        # Draw the in-progress rectangle in green (temp_rect is in *display* coords)
+        # If user is currently drawing, show the "temp_rect"
         if temp_rect:
-            x1_disp, y1_disp, x2_disp, y2_disp = temp_rect
-            cv2.rectangle(display_frame, (x1_disp, y1_disp), (x2_disp, y2_disp), (0, 255, 0), 2)
+            x1d, y1d, x2d, y2d = temp_rect
+            cv2.rectangle(display_frame, (x1d, y1d), (x2d, y2d), (0,255,0), 2)
 
-        # Instructions
+        # Info text
         cv2.putText(display_frame,
                     "Left-click & drag to draw. Press 's' to save, 'q' to quit.",
                     (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0,
+                    0.8,
                     (255, 255, 255),
                     2)
 
         cv2.imshow("Draw Ignore Zones", display_frame)
         key = cv2.waitKey(20) & 0xFF
         if key == ord('s'):
-            # Save to JSON (all zones in *original* coords)
-            if os.path.exists(output_json):
-                logger.info(f"Overwriting existing file: {output_json}")
-            with open(output_json, 'w') as f:
-                json.dump({"ignore_zones": zones}, f, indent=4)
-            logger.info(f"Zones saved to {output_json}")
+            # Save
+            save_zones_to_json(output_json)
         elif key == ord('q'):
+            # Prompt user to save or not
+            ans = input("You pressed 'q'. Do you want to SAVE changes before exiting? (y/N) ").strip().lower()
+            if ans == 'y':
+                save_zones_to_json(output_json)
             break
 
     cv2.destroyAllWindows()

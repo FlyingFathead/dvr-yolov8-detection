@@ -28,6 +28,8 @@ logs/**
 
 # region data
 ignore_zones.json
+data/
+data/**
 
 # local automation
 run_detection_firejail.sh

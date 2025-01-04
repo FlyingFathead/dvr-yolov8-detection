@@ -10,7 +10,7 @@ import logging
 API_URL = 'http://127.0.0.1:5000/api/detections'
 POLLING_INTERVAL = 1  # in seconds
 # Startup message
-STARTUP_MESSAGE = "Poller started."
+STARTUP_MESSAGE = "DVR framework audio poller started."
 
 # Configure logging to include timestamps and use local time
 logging.basicConfig(
@@ -54,19 +54,35 @@ def main():
     else:
         logger.info("No detections available at startup.")
 
+    # check if we're on first pass to change the welcome message
+    first_pass = True
+
     while True:
         latest_detection = get_latest_detection()
         if latest_detection:
             detection_timestamp = latest_detection.get('latest_timestamp')
             if detection_timestamp != last_detection_timestamp:
-                # New detection found
-                logger.info(f"New detection detected at {detection_timestamp}!")
-                engine.say("Human detected!")
-                engine.runAndWait()
+                # Skip TTS on first pass, just update our reference
+                if not first_pass:
+                    engine.say("Human detected!")
+                    engine.runAndWait()
                 last_detection_timestamp = detection_timestamp
-        else:
-            logger.debug("No detections received.")
+        first_pass = False
         time.sleep(POLLING_INTERVAL)
+
+    # while True:
+    #     latest_detection = get_latest_detection()
+    #     if latest_detection:
+    #         detection_timestamp = latest_detection.get('latest_timestamp')
+    #         if detection_timestamp != last_detection_timestamp:
+    #             # New detection found
+    #             logger.info(f"New detection detected at {detection_timestamp}!")
+    #             engine.say("Human detected!")
+    #             engine.runAndWait()
+    #             last_detection_timestamp = detection_timestamp
+    #     else:
+    #         logger.debug("No detections received.")
+    #     time.sleep(POLLING_INTERVAL)
 
 if __name__ == "__main__":
     main()

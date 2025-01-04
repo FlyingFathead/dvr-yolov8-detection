@@ -14,12 +14,13 @@ The video preview can be run both in a GUI window and headless on a local web se
 
 - **Real-time human/animal/object detection and alert system**
 - Runs on **Python + YOLOv8 + OpenCV2**
-- GUI and (headless) web server versions (`Flask`)
-- **Supports CUDA GPU acceleration**, CPU-only mode also supported
+- Both GUI and headless web server versions (`Flask`), 2-in-1
+- Set up separate minimum confidence zones with the included masking tool
+- **Supports CUDA GPU acceleration**, CPU-only mode is also supported
 - **RTMP streams** or **USB webcams** can be used for real-time video sources
   - _Includes a loopback example and NGINX configuration example for RTMP use (i.e. OBS Studio)_
 - Detections can be automatically saved as images with a detection log
-- Get real-time alerts on detections via **Telegram**
+- Get real-time alerts on detections via [**Telegram**](https://telegram.org)
 - Send detection data to any remote SSH/SFTP location
 - Separate tool included for **offline video file detections** for DVR-type faster-than-realtime post-processing (see: `utils/`)
 
@@ -230,6 +231,18 @@ Use the `utils/loopback_test_unit_ffmpeg-python.py` script to set up a loopback 
 
 **Note:** Using NGINX as a loopback method is highly recommended for stability.
 
+## Setup separate mask areas/zones (minimum confidence)
+
+**Mask detection areas**: this is highly useful where detections need to be above certain threshold to be saved and registered with separate alerts. You can use the method to i.e. increase thresholds on the input image's detection areas to avoid false positives.
+
+The masking can be done with a GUI rectangle painter util under `./utils/region_masker.py`, i.e.:
+
+  ```bash
+   python ./utils/region_masker.py
+  ```
+
+This will run a region masking utility that enables you to set special zones with a GUI interface (no headless mode yet!) and have it saved into a file (`./data/ignore_zones.json` by default; see `config.ini` on how to utilize the feature)
+
 ## Offline Batch Detection Utility
 
 Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on directories of video files, suitable for faster offline use.
@@ -269,6 +282,14 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1615**
+  - **New feature: Mask detection areas** -- this is highly useful where detections need to be above certain threshold to be saved and registered with separate alerts. You can use the method to i.e. increase thresholds on the input image's detection areas to avoid false positives.
+  - The masking can be done with a GUI rectangle painter util under `./utils/region_masker.py`, i.e. like so:
+  ```bash
+   python ./utils/region_masker.py
+  ```
+  - This will run a region masking utility that enables you to set special zones with a GUI interface (no headless mode yet!) and have it saved into a file (`./data/ignore_zones.json` by default; see `config.ini` for more configuration options)
+  - fixed poller startup message in `utils/detection_audio_poller.py`
 - **v0.1614.3**
   - preferred CUDA device can now be selected under `[hardware]` from `config.ini`
 - **v0.1614**
