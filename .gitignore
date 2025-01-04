@@ -26,5 +26,8 @@ yolo_detections/**
 logs/
 logs/**
 
+# region data
+ignore_zones.json
+
 # local automation
 run_detection_firejail.sh
