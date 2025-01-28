@@ -2,7 +2,7 @@ av>=13.1.0
 matplotlib>=3.8.4
 cycler>=0.12.1
 torch>=2.0.0
-ultralytics>=8.0.3
+ultralytics>=8.3.68
 # opencv-python-headless>=4.5.5.64
 opencv-python
 numpy>=1.22.0

@@ -2,18 +2,18 @@
 
 ## Description
 
-`dvr-yolov8-detection` is designed for real-time detection of humans, animals, or objects using the YOLOv8 model and OpenCV. 
+`dvr-yolov8-detection` is designed for real-time detection of humans, animals, or objects using the YOLOv8 model and OpenCV. Contrary to its name, we're now supporting models up to [**YOLOv11**](https://github.com/ultralytics/ultralytics?tab=readme-ov-file)!
 
 The program supports real-time video streams via RTMP or USB webcams, includes CUDA GPU acceleration for enhanced performance, and provides options for saving detections, triggering alerts and logging events.
 
 The video preview can be run both in a GUI window and headless on a local web server using the included Flask web server setup.
 
-**(New)** 🐳 A Dockerfile for Dockerized installs is also included.
-
 ## Features
 
 - **Real-time human/animal/object detection and alert system**
-- Runs on **Python + YOLOv8 + OpenCV2**
+- **(New!)** Now runs on the newest [YOLOv11](https://github.com/ultralytics/ultralytics?tab=readme-ov-file) model by default
+- 🐳 A Dockerfile for Dockerized installs is also included.
+- Runs on **Python + YOLOv8-11 + OpenCV2**
 - Both GUI and headless web server versions (`Flask`), 2-in-1
 - Set up separate minimum confidence zones with the included masking tool
 - **Supports CUDA GPU acceleration**, CPU-only mode is also supported
@@ -282,6 +282,11 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1616**
+  - **Now using YOLOv11 by default** 
+  - YOLOv11 is (as of writing this) the latest YOLO version from [ultralytics](https://github.com/ultralytics/ultralytics?tab=readme-ov-file)
+  - Update your `ultralytics` packages with i.e. `pip install -U ultralytics`
+  - Switch to any version you like from `config.ini`
 - **v0.1615**
   - **New feature: Mask detection areas** -- this is highly useful where detections need to be above certain threshold to be saved and registered with separate alerts. You can use the method to i.e. increase thresholds on the input image's detection areas to avoid false positives.
   - The masking can be done with a GUI rectangle painter util under `./utils/region_masker.py`, i.e. like so:

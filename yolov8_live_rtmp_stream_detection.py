@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+#
 # yolov8_live_rtmp_stream_detection.py
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # https://github.com/FlyingFathead/dvr-yolov8-detection
