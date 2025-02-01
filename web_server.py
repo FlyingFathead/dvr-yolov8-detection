@@ -793,6 +793,11 @@ def index():
             z-index: 1001;
         }
 
+        #center-buttons #swap-button {
+        position: static; /* Let the flex container handle positioning */
+        transform: none;
+        }
+
         /* Responsive design for mobile devices */
         @media only screen and (max-width: 600px) {
             #image-modal span {
@@ -813,6 +818,34 @@ def index():
             }
         }
 
+        /* Center button container always fixed at the bottom */
+        #center-buttons {
+        position: fixed;
+        bottom: 2vh;           /* 2% of viewport height from the bottom */
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 5px;              /* reduced gap between buttons */
+        z-index: 1001;
+        }
+
+        /* All buttons in the center container get a base style */
+        #center-buttons button {
+        padding: 1.5vh 3vh;    /* a bit smaller padding */
+        font-size: 2.5vh;
+        background-color: rgba(255, 255, 255, 0.9);
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        }
+
+        /* Make the skip buttons even slimmer */
+        #skip-back-button,
+        #skip-forward-button {
+        padding: 1vh 2vh;
+        font-size: 2vh;
+        }                                  
+                                  
         /* Loading spinner */
         #loading-spinner {
             display: none; /* Hidden by default */
@@ -880,15 +913,23 @@ def index():
 
     <!-- Modal Structure -->
     <div id="image-modal">
-        <span onclick="closeModal()">&times;</span>
-        <div id="modal-content">
-            <div id="loading-spinner"></div> <!-- Loading Spinner -->
-            <img id="modal-image" src="">
-            <div id="image-count"></div>
-        </div>
-        <button id="prev-button"></button>
-        <button id="next-button"></button>
-        <button id="swap-button">Swap Image Type</button>
+    <span onclick="closeModal()">&times;</span>
+    <div id="modal-content">
+        <div id="loading-spinner"></div> <!-- Loading Spinner -->
+        <img id="modal-image" src="">
+        <div id="image-count"></div>
+    </div>
+    <!-- Existing left/right navigation buttons remain -->
+    <button id="prev-button"></button>
+    <button id="next-button"></button>
+    <!-- New container for center buttons -->
+    <div id="center-buttons">
+        <button id="first-button">First</button>
+        <button id="skip-back-button">10 «</button>                                  
+        <button id="swap-button">Swap Type</button>
+        <button id="skip-forward-button">10 »</button>                                  
+        <button id="last-button">Last</button>
+    </div>
     </div>
 
     <h2>Backend Logs</h2>
@@ -1019,7 +1060,7 @@ def index():
             };
 
             // Set the image source to start loading
-            modalImage.src = `${basePath}/api/detections/${encodeURIComponent(filename)}`;
+            modalImage.src = `${basePath}/api/detections/${encodeURI(filename)}`;
         }
 
         modalImage.onload = function() {
@@ -1066,6 +1107,39 @@ def index():
             }
         };
 
+        document.getElementById('first-button').onclick = function() {
+        console.log("First image button clicked");
+        if (imageFilenames && imageFilenames.length > 0) {
+            currentIndex = 0;
+            showImage(currentIndex);
+        }
+        };
+
+        document.getElementById('skip-back-button').onclick = function() {
+        console.log("Skip back 10 button clicked");
+        if (imageFilenames && imageFilenames.length > 0) {
+            // Subtract 10, but don’t go below 0
+            currentIndex = Math.max(currentIndex - 10, 0);
+            showImage(currentIndex);
+        }
+        };
+
+        document.getElementById('skip-forward-button').onclick = function() {
+        console.log("Skip forward 10 button clicked");
+        if (imageFilenames && imageFilenames.length > 0) {
+            // Add 10, but don’t go past the last image
+            currentIndex = Math.min(currentIndex + 10, imageFilenames.length - 1);
+            showImage(currentIndex);
+        }
+        };
+                                  
+        document.getElementById('last-button').onclick = function() {
+        console.log("Last image button clicked");
+        if (imageFilenames && imageFilenames.length > 0) {
+            currentIndex = imageFilenames.length - 1;
+            showImage(currentIndex);
+        }
+        };
 
         function closeModal() {
             modal.style.display = 'none';

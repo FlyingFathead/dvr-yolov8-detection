@@ -282,6 +282,9 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1617**
+  - Web server: added better navigation detection image browsing (first/last, skip 10 forward/back)
+  - viewport fixes for image carousel
 - **v0.1616**
   - **Now using YOLOv11 by default** 
   - YOLOv11 is (as of writing this) the latest YOLO version from [ultralytics](https://github.com/ultralytics/ultralytics?tab=readme-ov-file)
