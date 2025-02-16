@@ -150,7 +150,7 @@ image_saving_stop_event = threading.Event()
 def load_masked_regions(config, main_logger):
     """
     If 'enable_masked_regions' is True, attempt to load the JSON
-    from 'output_json'. Store in global 'masked_regions'.
+    from 'masked_regions_output_json'. Store in global 'masked_regions'.
     """
     global masked_regions
 
@@ -160,7 +160,7 @@ def load_masked_regions(config, main_logger):
         return
 
     # If enabled, read the JSON file path
-    masked_json_path = config.get('region_masker', 'output_json', fallback='./ignore_zones.json')
+    masked_json_path = config.get('region_masker', 'masked_regions_output_json', fallback='./data/ignore_zones.json')
 
     main_logger.info(f"Masked regions are ENABLED. Attempting to load from: {masked_json_path}")
 
