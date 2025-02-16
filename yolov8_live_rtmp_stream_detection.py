@@ -159,7 +159,7 @@ def load_masked_regions(config, main_logger):
         return
 
     # If enabled, read the JSON file path
-    masked_json_path = config.get('region_masker', 'masked_regions_output_json', fallback='./data/ignore_zones.json')
+    masked_json_path = config.get('region_masker', 'masked_regions_output_json', fallback='./data/masked_zones.json')
 
     main_logger.info(f"Masked regions are ENABLED. Attempting to load from: {masked_json_path}")
 
@@ -171,7 +171,7 @@ def load_masked_regions(config, main_logger):
         import json
         with open(masked_json_path, 'r') as f:
             data = json.load(f)
-        loaded_zones = data.get("ignore_zones", [])
+        loaded_zones = data.get("masked_zones", [])
         masked_regions = loaded_zones  # store globally
         if loaded_zones:
             main_logger.info(f"Loaded {len(loaded_zones)} masked region(s) from '{masked_json_path}':")
