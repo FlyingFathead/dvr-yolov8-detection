@@ -145,9 +145,8 @@ webui_max_aggregation_entries = 100
 image_save_queue = Queue(maxsize=IMAGE_SAVE_QUEUE_MAXSIZE)
 image_saving_stop_event = threading.Event()
 
-named_zones = []
-
 # named zones / regions
+named_zones = []
 
 def load_named_zones(config, main_logger):
     """
@@ -815,28 +814,22 @@ def frame_processing_thread(
 
                 # 4A) We *do not* immediately queue a full-frame
                 #     We'll only do so if at least one detection is kept.
-                #     (So we don't waste a full-frame if they're all masked.)
                 
                 # 5) Per-detection
                 timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 SAVE_DIR = get_current_save_dir()  # update date-based subdir
 
-                kept_detections_list = []  # For logging, if you like
-
                 for det_idx, det in enumerate(detections):
                     x1, y1, x2, y2, confidence, class_idx = det
 
                     # 5A) Check masked regions logic:
-                    #     If in a masked region with threshold > this detection's confidence => skip
                     if masked_regions:
-                        # Unpack both values from apply_masked_regions
                         keep_detection, skip_info = apply_masked_regions(
                             int(x1), int(y1), int(x2), int(y2),
                             float(confidence),
                             masked_regions
                         )
                         if not keep_detection:
-                            # Now skip_info is available
                             zone_name = skip_info.get("zone_name", "UnknownZone")
                             required_conf = skip_info.get("required_conf", 1.0)
                             main_logger.info(
@@ -847,7 +840,19 @@ def frame_processing_thread(
                             # do NOT save or alert
                             continue
 
-                    # If we’re here => detection is *kept*
+                    # ========== NAMED ZONE LOGIC HERE ==========
+                    named_hits = find_named_zones_for_detection(
+                        int(x1), int(y1), int(x2), int(y2), named_zones
+                    )
+                    zone_names = []
+                    is_critical = False
+                    if named_hits:
+                        for (z_name, z_crit) in named_hits:
+                            zone_names.append(z_name)
+                            if z_crit is not None and confidence >= z_crit:
+                                is_critical = True
+
+                    # If we’re here => detection is kept
                     any_kept_detection = True
 
                     # 5B) If we haven't queued the full-frame yet, do so once
@@ -872,8 +877,8 @@ def frame_processing_thread(
                         y1_m = max(0, int(y1) - margin)
                         x2_m = min(denoised_frame.shape[1], int(x2) + margin)
                         y2_m = min(denoised_frame.shape[0], int(y2) + margin)
-
                         detection_area = denoised_frame[y1_m:y2_m, x1_m:x2_m]
+
                         detection_area_filename = generate_detection_area_filename(detection_count, det_idx)
                         try:
                             image_save_queue.put(
@@ -901,23 +906,23 @@ def frame_processing_thread(
                         'detection_count': detection_count,
                         'frame_count': int(total_frames),
                         'timestamp': timestamp,
-                        'coordinates': (int(x1), int(y1), int(x2), int(y2)),
+                        'coordinates': (
+                            int(x1), int(y1),
+                            int(x2), int(y2)
+                        ),
                         'confidence': float(confidence),
-                        'image_filenames': image_filenames
+                        'image_filenames': image_filenames,
+                        # NEW FIELDS for telegram / named-zone logic:
+                        'named_zones': zone_names,   # e.g. ["FrontDoor"]
+                        'is_critical': is_critical   # bool
                     }
 
                     with detections_lock:
                         detections_list.appendleft(detection_info)
 
-                    # 5E) Enqueue Telegram alert
-                    alert_message = {
-                        "detection_count": detection_info['detection_count'],
-                        "frame_count": detection_info['frame_count'],
-                        "timestamp": detection_info['timestamp'],
-                        "coordinates": detection_info['coordinates'],
-                        "confidence": detection_info['confidence']
-                    }
-                    telegram_alerts.queue_alert(alert_message)
+                    # 5E) Enqueue Telegram alert:
+                    # pass the FULL detection_info now
+                    telegram_alerts.queue_alert(detection_info)
 
                     # 5F) If draw_rectangles => draw
                     if draw_rectangles:
@@ -939,8 +944,7 @@ def frame_processing_thread(
                                 (0, 255, 0), 2
                             )
                         main_logger.info(
-                            f"Rectangle drawn: {ix1},{iy1},{ix2},{iy2}"
-                            f" with conf {confidence:.2f}"
+                            f"Rectangle drawn: {ix1},{iy1},{ix2},{iy2} with conf {confidence:.2f}"
                         )
 
                 # 6) If we had at least one valid detection, log details

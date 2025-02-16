@@ -117,8 +117,66 @@ def send_summary_alert(detections):
         f"<b>Number of Detections:</b> {bold_count}\n"
         f"<b>Confidence Range:</b> {min_confidence:.2f} - {max_confidence:.2f}"
     )
+
+    # ---- NEW ZONE-COLLECTION LOGIC ----
+    # Step 1: Gather all zone names from the aggregated detections
+    all_zones = set()
+    for d in detections:
+        if not isinstance(d, dict):
+            continue
+        # d.get('named_zones', []) might be e.g. ["FrontDoor","Driveway"]
+        for z in d.get('named_zones', []):
+            all_zones.add(z)
+
+    # Step 2: If we have ANY zones, append them to the summary
+    if all_zones:
+        zones_str = ", ".join(sorted(all_zones))  # sorted() to keep it neat
+        summary += f"\n<b>Zones:</b> {zones_str}"
+
     logger.info("Sending summary alert...")
     send_alert(summary)
+
+
+### NEW HELPER FUNCTION
+def build_detection_message(d):
+    """
+    Build a custom Telegram message depending on whether the detection
+    includes 'named_zones' and 'is_critical'.
+    """
+    ts = d.get('timestamp', 'N/A')
+    coords = d.get('coordinates', 'N/A')
+    conf = d.get('confidence', 0.0)
+
+    zone_list = d.get('named_zones', [])
+    is_crit = d.get('is_critical', False)
+
+    if zone_list:
+        # e.g. named_zones = ["FrontDoor","Driveway"]
+        zone_str = ", ".join(zone_list)
+        if is_crit:
+            # If any zone was critical
+            return (
+                f"⚠️👀💦 <b>CRITICAL DETECTION</b>\n"
+                f"Zone(s): <b>{zone_str}</b>\n"
+                f"Time: {ts}\n"
+                f"Coordinates: {coords}\n"
+                f"Confidence: {conf:.2f}"
+            )
+        else:
+            return (
+                f"🚨👀 Detection in zone(s): {zone_str}\n"
+                f"Time: {ts}\n"
+                f"Coordinates: {coords}\n"
+                f"Confidence: {conf:.2f}"
+            )
+    else:
+        # Fallback if no named zone
+        return (
+            f"🚨 Detection at {ts}\n"
+            f"Coordinates: {coords}\n"
+            f"Confidence: {conf:.2f}"
+        )
+
 
 def queue_alert(detection):
     """Queue a detection alert and manage cooldown for summary."""
@@ -139,6 +197,7 @@ def queue_alert(detection):
         with immediate_lock:
             immediate_alerts.append(detection)
 
+
 def immediate_alert_sender():
     """Send immediate alerts, optionally aggregated over a short interval."""
     while True:
@@ -148,16 +207,15 @@ def immediate_alert_sender():
                 alerts_to_send = immediate_alerts.copy()
                 immediate_alerts.clear()
 
-                detections_info = "\n".join([
-                    # f"🚨 Detection {d.get('frame_count', 'N/A')} at {d.get('timestamp', 'N/A')}\n"
-                    f"🚨 Detection at {d.get('timestamp', 'N/A')}\n"
-                    f"Coordinates: {d.get('coordinates', 'N/A')}\n"
-                    f"Confidence: {d.get('confidence', 0.0):.2f}"
-                    for d in alerts_to_send
-                ])
+                # Build messages for each detection
+                lines = []
+                for d in alerts_to_send:
+                    lines.append(build_detection_message(d))
 
-                message = f"{detections_info}"
+                # Combine them into one final message
+                message = "\n\n".join(lines)
                 send_alert(message)
+
 
 def summary_alert_sender():
     """Send a summary alert after the cooldown period with no detections."""
@@ -175,6 +233,7 @@ def summary_alert_sender():
                 pending_detections.clear()
                 detection_received_event.clear()  # Reset the event
 
+
 # Initialize message aggregation
 last_detection_time = 0
 pending_detections = []
@@ -191,6 +250,7 @@ if ENABLE_IMMEDIATE_ALERTS:
 # Start the summary alert sender thread
 summary_alert_thread = threading.Thread(target=summary_alert_sender, daemon=True)
 summary_alert_thread.start()
+
 
 def send_startup_message():
     """Send a startup notification message to all allowed users."""
