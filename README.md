@@ -15,13 +15,14 @@ The video preview can be run both in a GUI window and headless on a local web se
 - 🐳 A Dockerfile for Dockerized installs is also included.
 - Runs on **Python + YOLOv8-11 + OpenCV2**
 - Both GUI and headless web server versions (`Flask`), 2-in-1
-- Set up separate minimum confidence zones with the included masking tool
-- Name your regions and get alerted with zone names (i.e. on Telegram)
+  - Web server has i.e. easy-to-use image carousel for captured still viewing etc
 - **Supports CUDA GPU acceleration**, CPU-only mode is also supported
 - **RTMP streams** or **USB webcams** can be used for real-time video sources
   - _Includes a loopback example and NGINX configuration example for RTMP use (i.e. OBS Studio)_
+- Set up separate minimum confidence zones with the included masking tool
+- Name your regions and get alerted with zone names (i.e. on Telegram)
+- Additional real-time alerts on detections are also supported via [**Telegram**](https://telegram.org)
 - Detections can be automatically saved as images with a detection log
-- Get real-time alerts on detections via [**Telegram**](https://telegram.org)
 - Send detection data to any remote SSH/SFTP location
 - Separate tool included for **offline video file detections** for DVR-type faster-than-realtime post-processing (see: `utils/`)
 
