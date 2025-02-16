@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # File: ./utils/region_masker.py
 
 import cv2
@@ -76,14 +76,14 @@ def load_config():
 
     video_source = config.get("region_masker", "video_source", fallback=DEFAULT_VIDEO_SOURCE)
     enable_masked = config.getboolean("region_masker", "enable_masked_regions", fallback=False)
-    masked_json = config.get("region_masker", "masked_zones_output_json", fallback=DEFAULT_MASKED_ZONES_JSON)
+    masked_json = config.get("region_masker", "masked_regions_output_json", fallback=DEFAULT_MASKED_ZONES_JSON)
     enable_named = config.getboolean("region_masker", "enable_zone_names", fallback=False)
     named_json = config.get("region_masker", "named_zones_output_json", fallback=DEFAULT_NAMED_ZONES_JSON)
     critical_flag = config.getboolean("region_masker", "use_critical_thresholds", fallback=False)
 
     logger.info("=== [region_masker] settings from config.ini ===")
     logger.info(f"video_source={video_source}")
-    logger.info(f"enable_masked_regions={enable_masked}, masked_zones_output_json={masked_json}")
+    logger.info(f"enable_masked_regions={enable_masked}, masked_regions_output_json={masked_json}")
     logger.info(f"enable_zone_names={enable_named}, named_zones_output_json={named_json}")
     logger.info(f"use_critical_thresholds={critical_flag}")
     logger.info("===============================================")
