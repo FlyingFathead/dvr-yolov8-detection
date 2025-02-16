@@ -145,6 +145,66 @@ webui_max_aggregation_entries = 100
 image_save_queue = Queue(maxsize=IMAGE_SAVE_QUEUE_MAXSIZE)
 image_saving_stop_event = threading.Event()
 
+named_zones = []
+
+# named zones / regions
+
+def load_named_zones(config, main_logger):
+    """
+    Loads named zones from JSON if 'enable_zone_names' is true in config.ini.
+    Logs how many zones we found, and their details (same as we do for masked).
+    """
+    global named_zones
+    enable_named_zones = config.getboolean('region_masker', 'enable_zone_names', fallback=False)
+    if not enable_named_zones:
+        main_logger.info("Named zones are disabled in config. No named zone logic will be used.")
+        return
+
+    # Path from config
+    named_json_path = config.get('region_masker', 'named_zones_output_json', fallback='./data/named_zones.json')
+    main_logger.info(f"Named zones are ENABLED. Attempting to load from: {named_json_path}")
+
+    if not os.path.exists(named_json_path):
+        main_logger.warning(f"Named zones file '{named_json_path}' not found. Proceeding with no named zones.")
+        return
+
+    try:
+        import json
+        with open(named_json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        loaded_zones = data.get("named_zones", [])
+        named_zones = loaded_zones  # store globally
+
+        if loaded_zones:
+            main_logger.info(f"Loaded {len(loaded_zones)} named zone(s) from '{named_json_path}':")
+            for i, zone in enumerate(loaded_zones, 1):
+                zname = zone.get("name", f"Zone_{i}")
+                crit  = zone.get("critical_threshold", None)
+                x1    = zone.get("x1", 0)
+                y1    = zone.get("y1", 0)
+                x2    = zone.get("x2", 0)
+                y2    = zone.get("y2", 0)
+                if crit is not None:
+                    main_logger.info(f"  -> '{zname}' (critical≥{crit:.2f}) coords=({x1},{y1})→({x2},{y2})")
+                else:
+                    main_logger.info(f"  -> '{zname}' (no critical_threshold) coords=({x1},{y1})→({x2},{y2})")
+        else:
+            main_logger.info(f"File '{named_json_path}' loaded but no named zones found. Proceeding with none.")
+    except Exception as e:
+        main_logger.error(f"Failed to parse named zones from '{named_json_path}': {e}")
+        main_logger.info("Continuing with no named zones loaded.")
+
+def find_named_zones_for_detection(x1, y1, x2, y2, named_zones):
+    hits = []
+    for nz in named_zones:
+        nx1 = nz.get('x1', 0)
+        ny1 = nz.get('y1', 0)
+        nx2 = nz.get('x2', 0)
+        ny2 = nz.get('y2', 0)
+        if boxes_intersect(x1,y1,x2,y2, nx1,ny1,nx2,ny2):
+            hits.append((nz.get('name','?'), nz.get('critical_threshold', None)))
+    return hits
+
 # load masked regions if enabled
 def load_masked_regions(config, main_logger):
     """
@@ -335,6 +395,8 @@ main_logger, detection_logger, web_server_logger, detection_log_path = setup_log
 
 # Load masked regions if enabled
 load_masked_regions(config, main_logger)
+# load named zones if enabled
+load_named_zones(config, main_logger)
 
 # Timekeeping and frame counting
 last_log_time = time.time()
@@ -934,217 +996,6 @@ def frame_processing_thread(
         tts_stop_event.set()
         if not headless:
             cv2.destroyAllWindows()
-
-# # // old logic; changed and obsoleted on Jan 4th, 2025 w/ v0.1615
-# # // to be cleaned up ...
-#
-# def frame_processing_thread(frame_queue, stop_event, conf_threshold, draw_rectangles, denoise, process_fps, use_process_fps, detection_ongoing, headless):
-#     global last_tts_time, tts_thread, tts_stop_event
-#     model = load_model(DEFAULT_MODEL_VARIANT)
-#     use_cuda_denoising = cuda_denoising_available()
-#     detection_count = 0
-#     last_log_time = time.time()
-#     total_frames = 0
-#     detecting_human = False
-
-#     # Initialize an empty list to store image filenames
-#     image_filenames = []
-
-#     if not headless:
-#         # Create a named window with the ability to resize
-#         cv2.namedWindow('Real-time Human Detection', cv2.WINDOW_NORMAL)
-
-#     try:
-#         while not stop_event.is_set() or not frame_queue.empty():
-#             if not frame_queue.empty():
-#                 frame = frame_queue.get()
-#                 start_time = time.time()
-
-#                 if RESCALE_INPUT:
-#                     resized_frame = resize_frame(frame, TARGET_HEIGHT)
-#                 else:
-#                     resized_frame = frame
-
-#                 if denoise:
-#                     try:
-#                         if use_cuda_denoising:
-#                             gpu_frame = cv2.cuda_GpuMat()
-#                             gpu_frame.upload(resized_frame)
-#                             denoised_gpu = cv2.cuda.createFastNlMeansDenoisingColored(gpu_frame, None, 3, 3, 7)
-#                             denoised_frame = denoised_gpu.download()
-#                         else:
-#                             denoised_frame = cv2.fastNlMeansDenoisingColored(resized_frame, None, 3, 3, 7, 21)
-#                     except cv2.error as e:
-#                         main_logger.error(f"Error applying denoising: {e}")
-#                         denoised_frame = resized_frame
-#                 else:
-#                     denoised_frame = resized_frame
-
-#                 results = model.predict(source=denoised_frame, conf=conf_threshold, classes=[0], verbose=False)
-#                 detections = results[0].boxes.data.cpu().numpy()
-
-#                 if detections.size > 0:
-#                     if not detecting_human:
-#                         detecting_human = True
-#                         detection_ongoing.set()
-#                         detection_count += 1
-#                         main_logger.info(f"Detections found: {detections}")
-
-#                     image_filenames = []
-
-#                     # Initialize full_frame_filename outside the loop
-#                     full_frame_filename = None
-
-#                     # reset the logic for any kept detections
-#                     any_kept_detection = False
-
-#                     # Queue full-frame image for saving
-#                     if SAVE_FULL_FRAMES:
-#                         main_logger.info("Queuing full-frame image for saving.")
-#                         full_frame_filename = generate_full_frame_filename(detection_count)
-#                         try:
-#                             image_save_queue.put((denoised_frame.copy(), full_frame_filename, 'full_frame'), block=False)
-#                         except Full:
-#                             main_logger.warning("Image save queue is full. Dropping full-frame image.")
-#                             full_frame_filename = None
-
-#                     # Assign timestamp here
-#                     timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-#                     # Update SAVE_DIR to the current date-based directory
-#                     SAVE_DIR = get_current_save_dir()
-
-#                     for detection_index, detection in enumerate(detections):
-#                         x1, y1, x2, y2, confidence, class_idx = detection
-
-#                         # Call apply_masked_regions if we have masked regions loaded
-#                         if len(masked_regions) > 0:
-#                             keep_detection = apply_masked_regions(
-#                                 int(x1), int(y1), int(x2), int(y2),
-#                                 float(confidence),
-#                                 masked_regions
-#                             )
-#                             if not keep_detection:
-#                                 main_logger.info(
-#                                     f"Skipping detection in masked region: "
-#                                     f"({x1:.0f},{y1:.0f})-({x2:.0f},{y2:.0f}), conf={confidence:.2f}"
-#                                 )
-#                                 continue  # skip this detection entirely
-
-#                         # Initialize the image_info dictionary for this detection
-#                         image_info = {}
-
-#                         # Include full-frame filename if available
-#                         if full_frame_filename:
-#                             image_info['full_frame'] = os.path.relpath(os.path.join(SAVE_DIR, full_frame_filename), SAVE_DIR_BASE)
-
-#                         # Save detection area image and get filename
-#                         detection_area_filename = None
-#                         if SAVE_DETECTION_AREAS:
-#                             main_logger.info("Queuing detection area image for saving.")
-#                             main_logger.info(f"Applying margin of {DETECTION_AREA_MARGIN} pixels to detection area.")
-
-#                             # Apply margin
-#                             x1_margined = max(0, int(x1) - DETECTION_AREA_MARGIN)
-#                             y1_margined = max(0, int(y1) - DETECTION_AREA_MARGIN)
-#                             x2_margined = min(denoised_frame.shape[1], int(x2) + DETECTION_AREA_MARGIN)
-#                             y2_margined = min(denoised_frame.shape[0], int(y2) + DETECTION_AREA_MARGIN)
-
-#                             detection_area = denoised_frame[y1_margined:y2_margined, x1_margined:x2_margined]
-#                             detection_area_filename = generate_detection_area_filename(detection_count, detection_index)
-#                             try:
-#                                 image_save_queue.put((detection_area.copy(), detection_area_filename, 'detection_area'), block=False)
-#                             except Full:
-#                                 main_logger.warning("Image save queue is full. Dropping detection area image.")
-#                                 detection_area_filename = None
-
-#                             if detection_area_filename:
-#                                 image_info['detection_area'] = os.path.relpath(os.path.join(SAVE_DIR, detection_area_filename), SAVE_DIR_BASE)
-
-#                         # Build detection_info for this detection
-#                         detection_info = {
-#                             'detection_count': detection_count,
-#                             'frame_count': int(total_frames),
-#                             'timestamp': timestamp,
-#                             'coordinates': (
-#                                 int(x1), int(y1), int(x2), int(y2)
-#                             ),
-#                             'confidence': float(confidence),
-#                             'image_filenames': image_info
-#                         }
-
-#                         # Add detection_info to detections_list
-#                         with detections_lock:
-#                             detections_list.appendleft(detection_info)
-
-#                         # Construct the detection info as a dictionary
-#                         alert_message = {
-#                             "detection_count": detection_info.get('detection_count', 0),
-#                             "frame_count": detection_info.get('frame_count', 0),
-#                             "timestamp": detection_info.get('timestamp', ""),
-#                             "coordinates": detection_info.get('coordinates', (0, 0, 0, 0)),
-#                             "confidence": detection_info.get('confidence', 0.0)
-#                         }
-
-#                         # Queue the alert message as a dictionary
-#                         telegram_alerts.queue_alert(alert_message)
-
-#                         if draw_rectangles:
-#                             x1_rect, y1_rect = max(0, int(x1)), max(0, int(y1))
-#                             x2_rect = min(denoised_frame.shape[1], int(x2))
-#                             y2_rect = min(denoised_frame.shape[0], int(y2))
-#                             if not headless:
-#                                 cv2.rectangle(denoised_frame, (x1_rect, y1_rect), (x2_rect, y2_rect), (0, 255, 0), 2)
-#                                 label = f'Person: {confidence:.2f}'
-#                                 cv2.putText(denoised_frame, label, (x1_rect, y1_rect - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-#                             main_logger.info(f"Rectangle drawn: {x1_rect}, {y1_rect}, {x2_rect}, {y2_rect} with confidence {confidence:.2f}")
-
-#                     # Log the detection details
-#                     log_detection_details(detections, total_frames, timestamp)
-
-#                     # Start the TTS announcement in a separate thread if not already running
-#                     if tts_thread is None or not tts_thread.is_alive():
-#                         tts_stop_event.clear()
-#                         tts_thread = threading.Thread(target=announce_detection)
-#                         tts_thread.start()
-
-#                 else:
-#                     if detecting_human:
-#                         detecting_human = False
-#                         detection_ongoing.clear()
-#                         tts_stop_event.set()  # Stop TTS when no human is detected
-
-#                 if ENABLE_WEBSERVER:
-#                     # Send the processed frame to the web server
-#                     set_output_frame(denoised_frame)
-#                 elif not headless:
-#                     # Display the denoised frame
-#                     cv2.imshow('Real-time Human Detection', denoised_frame)
-#                     if cv2.waitKey(1) & 0xFF == ord('q'):
-#                         stop_event.set()
-#                         break
-
-#                 total_frames += 1
-#                 if time.time() - last_log_time >= 1:
-#                     fps = total_frames / (time.time() - last_log_time)
-#                     main_logger.info(f'Processed {total_frames} frames at {fps:.2f} FPS')
-#                     last_log_time = time.time()
-#                     total_frames = 0
-
-#                 if use_process_fps:
-#                     frame_time = time.time() - start_time
-#                     frame_interval = 1.0 / process_fps
-#                     time_to_wait = frame_interval - frame_time
-#                     if time_to_wait > 0:
-#                         time.sleep(time_to_wait)
-#             else:
-#                 time.sleep(0.01)  # Sleep briefly when queue is empty to prevent high CPU usage
-#     except Exception as e:
-#         main_logger.error(f"Error in frame_processing_thread: {e}", exc_info=True)
-#     finally:
-#         tts_stop_event.set()  # Ensure TTS stops if the program is stopping
-#         if not headless:
-#             cv2.destroyAllWindows()
 
 # When the user wants to exit
 HEADLESS = False  # Initialize globally
