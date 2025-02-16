@@ -134,7 +134,6 @@ CREATE_DATE_SUBDIRS = config.getboolean('detection', 'create_date_subdirs', fall
 ENABLE_WEBSERVER = config.getboolean('webserver', 'enable_webserver', fallback=False)
 WEBSERVER_HOST = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
 WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
-
 # Read AGGREGATED_DETECTIONS_FILE from config for remote sync
 ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('aggregation', 'enable_persistent_aggregated_detections', fallback=False)
 AGGREGATED_DETECTIONS_FILE = config.get('aggregation', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
