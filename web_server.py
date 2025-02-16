@@ -925,9 +925,9 @@ def index():
     <!-- New container for center buttons -->
     <div id="center-buttons">
         <button id="first-button">First</button>
-        <button id="skip-back-button">10 «</button>                                  
+        <button id="skip-back-button">«10</button>                                  
         <button id="swap-button">Swap Type</button>
-        <button id="skip-forward-button">10 »</button>                                  
+        <button id="skip-forward-button">10»</button>                                  
         <button id="last-button">Last</button>
     </div>
     </div>
