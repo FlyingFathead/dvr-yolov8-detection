@@ -16,6 +16,7 @@ The video preview can be run both in a GUI window and headless on a local web se
 - Runs on **Python + YOLOv8-11 + OpenCV2**
 - Both GUI and headless web server versions (`Flask`), 2-in-1
 - Set up separate minimum confidence zones with the included masking tool
+- Name your regions and get alerted with zone names (i.e. on Telegram)
 - **Supports CUDA GPU acceleration**, CPU-only mode is also supported
 - **RTMP streams** or **USB webcams** can be used for real-time video sources
   - _Includes a loopback example and NGINX configuration example for RTMP use (i.e. OBS Studio)_
@@ -282,6 +283,10 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1618**
+  - Named region masking is here, with critical thresholds
+  - Use the renewd `./utils/region_masker.py` to set up your region names and their critical thresholds
+  - Currently, Telegram alerts support notifications that emphasize the alert on critical thresholds
 - **v0.1617**
   - Web server: added better navigation detection image browsing (first/last, skip 10 forward/back)
   - viewport fixes for image carousel
