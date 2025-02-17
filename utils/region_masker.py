@@ -306,6 +306,7 @@ def main():
                 color = (0, 255, 0)
                 prefix = "[NAMED]"
 
+            # 1) Draw existing saved rectangles
             for z in zones:
                 x1o, y1o = z.get("x1", 0), z.get("y1", 0)
                 x2o, y2o = z.get("x2", 0), z.get("y2", 0)
@@ -328,6 +329,11 @@ def main():
                 label_y = y1d - 5 if (y1d - 10) > 0 else y1d + 15
                 cv2.putText(display_frame, label, (x1d, label_y),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255,255,255), 2)
+
+            # 2) Draw the "temp_rect" if we are in the middle of drawing
+            if temp_rect is not None:
+                (rx1, ry1, rx2, ry2) = temp_rect
+                cv2.rectangle(display_frame, (rx1, ry1), (rx2, ry2), color, 2)
 
             # Additional instructions at the bottom
             cv2.putText(
