@@ -21,6 +21,7 @@ MAX_LOG_SIZE=$((10 * 1024 * 1024)) # 10 MB in bytes
 # Determine file extension
 EXTENSION=$([[ "$REMUX_TO_MP4" == true ]] && echo "mp4" || echo "ts")
 
+# // ssh command with audio mapping for long-term audio storage
 SSH_COMMAND="ffmpeg \
     -rw_timeout 5000000 \
     -fflags +genpts+igndts+discardcorrupt \
@@ -34,12 +35,33 @@ SSH_COMMAND="ffmpeg \
     -hls_allow_cache 0 \
     -hls_segment_filename '${VPS_PATH}/hls_segments/segment_%03d.ts' \
     '${VPS_PATH}/hls_segments/playlist.m3u8' \
-    -c copy \
+    -map 0 -c copy \
     -f segment \
     -strftime 1 \
     -segment_time 600 \
     -reset_timestamps 1 \
     '${VPS_PATH}/recording_%Y%m%d_%H%M%S.${EXTENSION}'"
+
+# // old ssh command / method (not always optimal in saved file audio mapping)
+# SSH_COMMAND="ffmpeg \
+#     -rw_timeout 5000000 \
+#     -fflags +genpts+igndts+discardcorrupt \
+#     -avoid_negative_ts make_zero \
+#     -i - \
+#     -c copy -map 0 \
+#     -f hls \
+#     -hls_time 2 \
+#     -hls_list_size 5 \
+#     -hls_flags delete_segments+append_list \
+#     -hls_allow_cache 0 \
+#     -hls_segment_filename '${VPS_PATH}/hls_segments/segment_%03d.ts' \
+#     '${VPS_PATH}/hls_segments/playlist.m3u8' \
+#     -c copy \
+#     -f segment \
+#     -strftime 1 \
+#     -segment_time 600 \
+#     -reset_timestamps 1 \
+#     '${VPS_PATH}/recording_%Y%m%d_%H%M%S.${EXTENSION}'"
 
 RETRY_DELAY=${RETRY_DELAY:-5}
 export RETRY_DELAY
