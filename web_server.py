@@ -950,7 +950,12 @@ def index():
         <script>
         // Quick snippet to attach HLS if not natively supported:
         const video = document.getElementById('hls-video');
-        const hlsPlaylist = '/hls/playlist.m3u8';
+        
+        const hlsPlaylist = './hls/playlist.m3u8';
+                                  
+        // other variations
+        // const basePath = "{{ base_path }}";
+        // const hlsPlaylist = basePath + '/hls/playlist.m3u8';
         
         if (video.canPlayType('application/vnd.apple.mpegurl')) {
             // Safari, iOS, etc. can play HLS natively
