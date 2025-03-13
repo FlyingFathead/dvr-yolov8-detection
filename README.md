@@ -284,6 +284,11 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1619**
+  - **Stream preview in the WebUI can now be swapped between HLS and MJPEG**
+  - (HLS is sourced from the source RTMP stream; higher frame rates without recoding)
+  - See `config.ini` => `preview_method = mjpeg` (swap to `hls` for HLS)
+  - More options under `[hls]` section in the `config.ini`
 - **v0.1618**
   - Named region masking is here, with critical thresholds
   - Use the renewd `./utils/region_masker.py` to set up your region names and their critical thresholds

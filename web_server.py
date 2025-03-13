@@ -8,6 +8,7 @@ import version  # Import the version module
 version_number = version.version_number
 
 import sys
+import subprocess
 import os
 import signal
 import shutil
@@ -42,6 +43,8 @@ app = Flask(__name__)
 # Global variables to hold the output frame and a lock for thread safety
 output_frame = None
 frame_lock = threading.Lock()
+# HLS process status
+hls_process = None 
 
 # detect interrupt signals and safely write detections if enabled
 def signal_handler(sig, frame):
@@ -139,6 +142,50 @@ connected_clients = {}
 
 # Initialize the lock for connected_clients
 connected_clients_lock = threading.Lock()
+
+# on-request HLS streaming
+def start_hls_ffmpeg_if_needed():
+    global hls_process
+    # If already running, do nothing
+    if hls_process is not None:
+        return
+
+    # Pull config from app or global config
+    hls_output_dir = app.config.get('hls_output_dir', '/tmp/hls')
+    input_stream   = app.config.get('stream_url', 'rtmp://127.0.0.1:1935/live/stream')
+    hls_time       = app.config.get('hls_time', '2')
+    hls_list_size  = app.config.get('hls_list_size', '10')
+    segment_pattern = app.config.get('segment_pattern', 'segment_%03d.ts')
+    playlist_filename = app.config.get('playlist_filename', 'playlist.m3u8')
+
+    # Ensure output directory exists
+    os.makedirs(hls_output_dir, exist_ok=True)
+
+    segment_path  = os.path.join(hls_output_dir, segment_pattern)
+    playlist_path = os.path.join(hls_output_dir, playlist_filename)
+
+    cmd = [
+        'ffmpeg',
+        '-i', input_stream,
+        '-c', 'copy',
+        '-f', 'hls',
+        '-hls_time', str(hls_time),
+        '-hls_list_size', str(hls_list_size),
+        '-hls_segment_filename', segment_path,
+        playlist_path
+    ]
+    logger.info("Starting HLS ffmpeg: " + " ".join(cmd))
+
+    hls_process = subprocess.Popen(cmd)
+
+# on-request hls stopper
+def stop_hls_ffmpeg():
+    global hls_process
+    if hls_process is not None:
+        logger.info("Terminating HLS ffmpeg...")
+        hls_process.terminate()
+        hls_process.wait(timeout=5)
+        hls_process = None    
 
 # rotate aggregated files
 def rotate_aggregated_files():
@@ -560,6 +607,24 @@ def serve_detection_image(filename):
         logger.error(f"File not found: {filepath}")
         return "File not found", 404
 
+@app.route('/api/toggle_preview', methods=['POST'])
+def toggle_preview():
+    """Toggle between MJPEG and HLS preview on demand."""
+    current_method = app.config.get('preview_method', 'mjpeg')
+
+    if current_method == 'mjpeg':
+        # Switch to HLS
+        app.config['preview_method'] = 'hls'
+        start_hls_ffmpeg_if_needed()
+        logger.info("Switched preview_method to HLS.")
+        return jsonify({"status": "ok", "new_method": "hls"}), 200
+    else:
+        # Switch to MJPEG
+        app.config['preview_method'] = 'mjpeg'
+        stop_hls_ffmpeg()
+        logger.info("Switched preview_method to MJPEG.")
+        return jsonify({"status": "ok", "new_method": "mjpeg"}), 200
+
 # # send from directory method // flask doesn't allow
 # @app.route('/detections/<path:filename>')
 # def serve_detection_image(filename):
@@ -931,7 +996,25 @@ def index():
     </div>
 
     <h1>Real-time Human Detection</h1>
-    
+
+<!---    <button id="preview-toggle-btn">Toggle MJPEG/HLS</button>
+    <script>
+    document.getElementById('preview-toggle-btn').addEventListener('click', function(e) {
+    fetch('{{ base_path }}/api/toggle_preview', {
+        method: 'POST'
+    })
+    .then(resp => resp.json())
+    .then(data => {
+        console.log('Toggle preview response:', data);
+        // Option #1: reload the page so it picks up the new method
+        location.reload();
+        // Or #2: dynamically update video element:
+        // ...
+    })
+    .catch(err => console.error('Error toggling preview:', err));
+    });
+    </script> --!>
+
     {% if preview_method == "mjpeg" %}
         <h2>(MJPEG Preview)</h2>
         <img src="{{ base_path }}{{ url_for('video_feed') }}" width="100%">
