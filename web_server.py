@@ -56,7 +56,9 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 def load_config(config_file='config.ini'):
     """Loads configuration from the specified INI file."""
-    config = configparser.ConfigParser()
+    # config = configparser.ConfigParser()
+    # Turn off interpolation so “%03d” won't cause a syntax error:
+    config = configparser.ConfigParser(interpolation=None)    
     read_files = config.read(config_file)
     if not read_files:
         logger.error(f"Configuration file '{config_file}' not found or is empty.")
@@ -100,12 +102,18 @@ check_interval = config.getint('webserver', 'check_interval', fallback=10)
 # Persistent aggregated detections
 ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('aggregation', 'enable_persistent_aggregated_detections', fallback=False)
 AGGREGATED_DETECTIONS_FILE = config.get('aggregation', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
+# set the preview method
+preview_method = config.get('webserver', 'preview_method', fallback='mjpeg')
+logger.info(f"Preview method set to: {preview_method}")
 
 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
     logger.info(f"Persistent aggregated detections enabled. Logging to file: {AGGREGATED_DETECTIONS_FILE}")
 
 # Gglobal variables for aggregation
 # aggregated_detections_list = deque(maxlen=100)  # Adjust maxlen as needed
+
+# get HLS directory if in use
+HLS_OUTPUT_DIR = config.get('hls', 'hls_output_dir', fallback='/tmp/hls')
 
 # Initialize the aggregated_detections_list and aggregated_lock
 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
@@ -296,6 +304,7 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
     logger.info(f"Web Server Host: {host}")
     logger.info(f"Web Server Port: {port}")
     logger.info(f"Web Server Max FPS: {app.config['webserver_max_fps']}")
+    logger.info(f"Preview Method: {preview_method}")
     logger.info(f"Check Interval: {config.getint('webserver', 'check_interval', fallback=10)} seconds")
     logger.info(f"Web UI Cooldown Aggregation: {config.getint('webui', 'webui_cooldown_aggregation', fallback=30)} seconds")
     logger.info(f"Web UI Bold Threshold: {config.getint('webui', 'webui_bold_threshold', fallback=10)}")
@@ -569,16 +578,41 @@ def get_current_time():
     host_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     return jsonify({'current_time': host_time})
 
-@app.route('/video_feed')
-def video_feed():
-    """Video streaming route. Put this in the src attribute of an img tag."""
-    return Response(stream_with_context(generate_frames()),
-                    mimetype='multipart/x-mixed-replace; boundary=frame',
-                    headers={
-                        'Cache-Control': 'no-cache, no-store, must-revalidate',
-                        'Pragma': 'no-cache',
-                        'Expires': '0'
-                    })
+if preview_method == 'mjpeg':
+    @app.route('/video_feed')
+    def video_feed():
+        """Video streaming route (MJPEG)."""
+        return Response(
+            stream_with_context(generate_frames()),
+            mimetype='multipart/x-mixed-replace; boundary=frame',
+            headers={
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+                'Pragma': 'no-cache',
+                'Expires': '0'
+            }
+        )
+else:
+    logger.info("MJPEG route disabled (preview_method != 'mjpeg').")
+
+# @app.route('/video_feed')
+# def video_feed():
+#     """Video streaming route. Put this in the src attribute of an img tag."""
+#     return Response(stream_with_context(generate_frames()),
+#                     mimetype='multipart/x-mixed-replace; boundary=frame',
+#                     headers={
+#                         'Cache-Control': 'no-cache, no-store, must-revalidate',
+#                         'Pragma': 'no-cache',
+#                         'Expires': '0'
+#                     })
+
+# for HLS
+@app.route('/hls/<path:filename>')
+def hls_files(filename):
+    """
+    Serve the .m3u8 and .ts files from HLS_OUTPUT_DIR,
+    so that /hls/playlist.m3u8 and /hls/segment_000.ts will be found.
+    """
+    return send_from_directory(HLS_OUTPUT_DIR, filename)
 
 # get aggregated detections rather than flood the webui
 @app.route('/api/detections')
@@ -882,6 +916,9 @@ def index():
         }
 
     </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>                                    
+
 </head>
 <body>
     <script>
@@ -894,7 +931,40 @@ def index():
     </div>
 
     <h1>Real-time Human Detection</h1>
-    <img src="{{ base_path }}{{ url_for('video_feed') }}" width="100%">
+    
+    {% if preview_method == "mjpeg" %}
+        <h2>(MJPEG Preview)</h2>
+        <img src="{{ base_path }}{{ url_for('video_feed') }}" width="100%">
+    {% else %}
+        <h2>(HLS Preview)</h2>
+        <!-- # We give the video an ID so we can attach Hls.js if needed: -->
+        <video 
+            id="hls-video" 
+            controls 
+            autoplay 
+            muted 
+            playsinline 
+            width="100%"
+        ></video>
+
+        <script>
+        // Quick snippet to attach HLS if not natively supported:
+        const video = document.getElementById('hls-video');
+        const hlsPlaylist = '/hls/playlist.m3u8';
+        
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+            // Safari, iOS, etc. can play HLS natively
+            video.src = hlsPlaylist;
+        } else if (Hls.isSupported()) {
+            // Attach hls.js for other browsers
+            var hls = new Hls();
+            hls.loadSource(hlsPlaylist);
+            hls.attachMedia(video);
+        } else {
+            console.error("This browser does not support MSE and cannot play HLS!");
+        }
+        </script>
+    {% endif %}
 
     <h2>Latest Detections</h2>
     <ul id="detections-list">
@@ -1317,7 +1387,7 @@ def index():
                                   
 </body>
 </html>
-    ''', detections=detections, logs=logs, graph_image=graph_image, base_path=base_path, version=version_number)
+    ''', detections=detections, logs=logs, graph_image=graph_image, base_path=base_path, version=version_number, preview_method=preview_method)
 
 @app.route('/api/detection_graph/<int:hours>')
 def detection_graph_route(hours):

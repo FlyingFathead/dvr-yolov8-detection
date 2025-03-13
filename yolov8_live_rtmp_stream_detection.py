@@ -23,6 +23,7 @@ import pytz
 
 from collections import deque, defaultdict
 import pyttsx3
+import subprocess
 import os
 from ultralytics import YOLO
 import threading
@@ -68,7 +69,9 @@ def load_config(config_path=None):
             config_path = os.path.join(script_dir, 'config.ini')
         
         print(f"Attempting to load config from: {config_path}", flush=True)
-        config = configparser.ConfigParser()
+        # config = configparser.ConfigParser()
+        # Turn off interpolation so “%03d” won't cause a syntax error:
+        config = configparser.ConfigParser(interpolation=None)        
         # config.optionxform = str  # Make keys case-sensitive
         read_files = config.read(config_path)
         
@@ -147,6 +150,59 @@ image_saving_stop_event = threading.Event()
 
 # named zones / regions
 named_zones = []
+
+# hls relay
+# hls relay
+def run_hls_relay_if_enabled(config):
+    """
+    If config says 'preview_method = hls', read the [hls] section 
+    and launch an FFmpeg sub-process for HLS output. 
+    """
+    # 1) Check if user wants HLS in config
+    method = config.get('webserver', 'preview_method', fallback='mjpeg')
+    if method.lower() != 'hls':
+        return  # Not HLS? Then skip entirely
+
+    # 2) Grab HLS config
+    hls_output_dir = config.get('hls', 'hls_output_dir', fallback='/tmp/hls')
+    hls_time = config.get('hls', 'hls_time', fallback='2')
+    hls_list_size = config.get('hls', 'hls_list_size', fallback='10')
+    segment_pattern = config.get('hls', 'segment_pattern', fallback='segment_%03d.ts')
+    playlist_filename = config.get('hls', 'playlist_filename', fallback='playlist.m3u8')
+
+    # 3) Input stream for ffmpeg (the same RTMP you’re reading?)
+    #    Possibly read from the [stream] section
+    input_stream = config.get('stream', 'stream_url', fallback='rtmp://127.0.0.1:1935/live/stream')
+
+    # 4) Ensure the directory exists
+    os.makedirs(hls_output_dir, exist_ok=True)
+
+    # 5) Build the paths
+    segment_path = os.path.join(hls_output_dir, segment_pattern)
+    playlist_path = os.path.join(hls_output_dir, playlist_filename)
+
+    # 6) Construct the FFmpeg command
+    cmd = [
+        'ffmpeg',
+        '-i', input_stream,
+        '-c', 'copy',
+        '-f', 'hls',
+        '-hls_time', str(hls_time),
+        '-hls_list_size', str(hls_list_size),
+        '-hls_segment_filename', segment_path,
+        playlist_path
+    ]
+
+    # 7) Launch in background
+    #    If you want to hold the process open, do process.wait() 
+    #    or store the handle somewhere for later kill.
+    print("Starting HLS relay with command:")
+    print(" ".join(cmd))
+    
+    hls_proc = subprocess.Popen(cmd)
+    # optional: store the process handle for future stop
+
+    return hls_proc
 
 def load_named_zones(config, main_logger):
     """
@@ -1372,6 +1428,8 @@ if __name__ == "__main__":
     main_logger.info(f"PNG compression level is set to: {PNG_COMPRESSION_LEVEL}")    
     main_logger.info(f"WebP lossless compression is {'enabled' if WEBP_LOSSLESS else 'disabled'}")
 
+    hls_proc = run_hls_relay_if_enabled(config)
+
     # Initialize queues and events
     frame_queue = Queue(maxsize=IMAGE_SAVE_QUEUE_MAXSIZE)
     stop_event = Event()
@@ -1403,5 +1461,8 @@ if __name__ == "__main__":
         main_logger.info("Cleaning up threads and resources.")
         if not HEADLESS and not ENABLE_WEBSERVER:
             cv2.destroyAllWindows()
+        if hls_proc:
+            hls_proc.terminate()
+            hls_proc.wait()            
         main_logger.info("Program exited cleanly.")
 
