@@ -1,5 +1,5 @@
 # Used by catgit; https://github.com/FlyingFathead/catgit
-README.md
+#README.md
 CUDA_SETUP.md
 LICENSE
 yolo_detections/**

@@ -25,7 +25,19 @@ from collections import deque, defaultdict
 import pyttsx3
 import subprocess
 import os
+
+# Set to ´False` to disable Ultralytics telemetry
+# (Must be set before ultralytics is imported)
+# The switch is set to `False` by default
+os.environ['ULTRALYTICS_TELEMETRY'] = 'False'
+
+# import main Ultralytics module
 from ultralytics import YOLO
+
+# optional explicit opt-out from Ultralytics telemetry
+from ultralytics import settings
+settings.update({"sync": False})
+
 import threading
 from threading import Thread, Event, Lock
 from queue import Queue, Empty, Full
@@ -45,6 +57,9 @@ import telegram_alerts
 
 hz_line()
 print(f"::: dvr-yolov8-detection v{version_number} | https://github.com/FlyingFathead/dvr-yolov8-detection/")
+hz_line()
+# Print the entire settings dict
+print("Ultralytics settings:", settings)
 hz_line()
 
 # Shared data structures

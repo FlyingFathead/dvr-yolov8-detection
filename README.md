@@ -284,6 +284,9 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1620**
+  - Disabled telemetry in Ultralytics modules by default
+  - Added a printout on startup to display Ultralytics settings
 - **v0.1619**
   - **Stream preview in the WebUI can now be swapped between HLS and MJPEG**
   - (HLS is sourced from the source RTMP stream; higher frame rates without recoding)
