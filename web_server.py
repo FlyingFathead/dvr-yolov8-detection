@@ -21,11 +21,18 @@ from flask import Flask, Response, render_template_string, stream_with_context, 
 from flask import send_from_directory
 from flask import send_file
 from werkzeug.utils import safe_join
+
+# threaded serving via waitress
+from waitress import serve 
+
 import cv2
 import logging
 from web_graph import generate_detection_graph
 import configparser
 import json
+
+# aggergation for the detections for webUI
+from collections import defaultdict
 
 # Configure logging for the web server
 logger = logging.getLogger('web_server')
@@ -97,6 +104,7 @@ ENABLE_WEBSERVER = config.getboolean('webserver', 'enable_webserver', fallback=T
 WEBSERVER_HOST = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
 WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
 WEBSERVER_MAX_FPS = config.getint('webserver', 'webserver_max_fps', fallback=10)
+MJPEG_QUALITY = config.getint('webserver', 'mjpeg_quality', fallback=75) # Read MJPEG quality for web preview
 WEBUI_COOLDOWN_AGGREGATION = config.getint('webui', 'webui_cooldown_aggregation', fallback=30)
 WEBUI_BOLD_THRESHOLD = config.getint('webui', 'webui_bold_threshold', fallback=10)
 # Read check_interval from config.ini with a fallback to 10
@@ -105,9 +113,12 @@ check_interval = config.getint('webserver', 'check_interval', fallback=10)
 # Persistent aggregated detections
 ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('aggregation', 'enable_persistent_aggregated_detections', fallback=False)
 AGGREGATED_DETECTIONS_FILE = config.get('aggregation', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
-# set the preview method
+
+# set the preview method and inform about it
 preview_method = config.get('webserver', 'preview_method', fallback='mjpeg')
 logger.info(f"Preview method set to: {preview_method}")
+if preview_method == 'mjpeg':
+    logger.info(f"MJPEG Quality set to: {MJPEG_QUALITY}") # Log the quality
 
 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
     logger.info(f"Persistent aggregated detections enabled. Logging to file: {AGGREGATED_DETECTIONS_FILE}")
@@ -314,6 +325,8 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
         SAVE_DIR_BASE = get_base_save_dir(config)
         logger.info(f"Initialized SAVE_DIR_BASE within web server: {SAVE_DIR_BASE}")
 
+    app.config['mjpeg_quality'] = config.getint('webserver', 'mjpeg_quality', fallback=75)
+
     app.config['SAVE_DIR_BASE'] = SAVE_DIR_BASE
 
     logger.info(f"SAVE_DIR_BASE is set to: {app.config['SAVE_DIR_BASE']}")
@@ -352,6 +365,8 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
     logger.info(f"Web Server Port: {port}")
     logger.info(f"Web Server Max FPS: {app.config['webserver_max_fps']}")
     logger.info(f"Preview Method: {preview_method}")
+    if preview_method == 'mjpeg':
+        logger.info(f"MJPEG Stream Quality: {app.config['mjpeg_quality']}")    
     logger.info(f"Check Interval: {config.getint('webserver', 'check_interval', fallback=10)} seconds")
     logger.info(f"Web UI Cooldown Aggregation: {config.getint('webui', 'webui_cooldown_aggregation', fallback=30)} seconds")
     logger.info(f"Web UI Bold Threshold: {config.getint('webui', 'webui_bold_threshold', fallback=10)}")
@@ -362,7 +377,9 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
     logger.info("======================================================")
 
     # app.run(host=host, port=port, threaded=True)
-    app.run(host=host, port=port, threaded=True, use_reloader=False)    
+    # // old method
+    # app.run(host=host, port=port, threaded=True, use_reloader=False)    
+    serve(app, host=host, port=port, threads=16)
 
 def set_output_frame(frame):
     """Updates the global output frame to be served to clients."""
@@ -373,49 +390,59 @@ def set_output_frame(frame):
 def generate_frames():
     """Generator function that yields frames in byte format for streaming."""
     global output_frame
-    max_fps = app.config.get('webserver_max_fps', 10)  # Default to 10 FPS if not set
-    frame_interval = 1.0 / max_fps
+    max_fps = app.config.get('webserver_max_fps', 10)
+    # --- ADDED: Get MJPEG Quality from app.config ---
+    mjpeg_quality = app.config.get('mjpeg_quality', 75) # Default to 75 if not found
+    # --- END ADDED ---
+
+    frame_interval = 1.0 / max_fps if max_fps > 0 else 0 # Allow 0 FPS to effectively disable limit
     last_frame_time = time.time()
+
+    client_ip = request.remote_addr
+    logger.info(f"MJPEG Client Connected: {client_ip}. Max FPS: {max_fps}, Quality: {mjpeg_quality}")
+
     while True:
+        frame_copy = None
         with frame_lock:
-            if output_frame is None:
-                frame_copy = None
-            else:
-                # Make a copy of the frame
+            if output_frame is not None:
                 frame_copy = output_frame.copy()
-        
+
         if frame_copy is None:
-            # Sleep briefly to prevent 100% CPU utilization
-            time.sleep(0.01)
+            time.sleep(0.05) # Wait if no frame available yet
             continue
 
-        # Limit the frame rate
+        # --- FPS Limiting (applied BEFORE encoding) ---
         current_time = time.time()
-        elapsed_time = current_time - last_frame_time
-        if elapsed_time < frame_interval:
-            time.sleep(frame_interval - elapsed_time)
+        elapsed_since_last = current_time - last_frame_time
+        if frame_interval > 0 and elapsed_since_last < frame_interval:
+             wait_time = frame_interval - elapsed_since_last
+             time.sleep(wait_time)
+        # Update time *after* potential sleep, *before* encoding
         last_frame_time = time.time()
+        # --- End FPS Limiting ---
 
-        # Encode the frame in JPEG format outside the lock
-        ret, jpeg = cv2.imencode('.jpg', frame_copy)
-        if not ret:
-            continue
-        frame_bytes = jpeg.tobytes()
+        # Encode the frame in JPEG format *using the configured quality*
+        try:
+            encode_param = [cv2.IMWRITE_JPEG_QUALITY, mjpeg_quality]
+            ret, jpeg_buffer = cv2.imencode('.jpg', frame_copy, encode_param)
+            if not ret:
+                logger.warning("cv2.imencode failed, skipping frame.")
+                continue # Skip this frame if encoding fails
+            frame_bytes = jpeg_buffer.tobytes()
+        except Exception as e:
+             logger.error(f"Error during cv2.imencode: {e}")
+             continue # Skip frame on encoding error
 
         # Yield the output frame in byte format
         try:
             yield (b'--frame\r\n'
-                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         except GeneratorExit:
-            # Client disconnected
-            break
+            logger.info(f"MJPEG Client Disconnected (GeneratorExit): {client_ip}")
+            break # Client disconnected
         except Exception as e:
-            logger.error(f"Error in streaming frames: {e}")
-            break
-
-# aggergation for the detections for webUI
-# At the beginning of the file
-from collections import defaultdict
+            logger.error(f"Error yielding MJPEG frame to {client_ip}: {e}")
+            break # Other error during yield
 
 # Inside aggregation_thread_function
 def aggregation_thread_function(detections_list, detections_lock, cooldown=30, bold_threshold=10):
