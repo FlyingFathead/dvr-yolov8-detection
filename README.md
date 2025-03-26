@@ -284,6 +284,13 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **v0.1621**
+  **Web server updates:**
+  - Switched to use `waitress` (`pip install -U waitress` or use the `requirements.txt`)
+  - `waitress` = better threading and multitasking with `Flask`
+  - MJPEG preview quality in webUI previews now configurable from `config.ini`
+    => under `[webserver]` => `mjpeg_quality`
+  - webui improvements: detections are now categorized under date headers for improved readability
 - **v0.1620**
   - Disabled telemetry in Ultralytics modules by default
   - Added a printout on startup to display Ultralytics settings
