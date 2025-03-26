@@ -1100,6 +1100,24 @@ def index():
     });
     </script> --!>
 
+    <script>
+    document.addEventListener('click', function(e) {
+    if (e.target.matches('.view-images-btn')) {
+        // Grab the JSON from the data-images attribute
+        const jsonStr = e.target.getAttribute('data-images');
+        let imageFilenames;
+        try {
+        imageFilenames = JSON.parse(jsonStr);
+        } catch (err) {
+        console.error("Bad JSON in data-images:", err);
+        return;
+        }
+        // Then call your existing function
+        showImages(imageFilenames);
+    }
+    });
+    </script>                                  
+
     {% if preview_method == "mjpeg" %}
         <h2>(MJPEG Preview)</h2>
         <img src="{{ base_path }}{{ url_for('video_feed') }}" width="100%">
@@ -1150,7 +1168,12 @@ def index():
             <em>(Ongoing)</em>
             {% endif %}
             {% if detection.image_filenames %}
-            - <a href="#" onclick="showImages({{ detection.image_filenames | tojson }}); return false;">View Images</a>
+            <button 
+                class="view-images-btn"
+                data-images='{{ detection.image_filenames | tojson|safe }}'
+            >
+                View Images
+            </button>
             {% endif %}
         </li>
         {% endfor %}
@@ -1453,38 +1476,6 @@ def index():
             touchStartX = null;
         }, false);
 
-        // Function to fetch and update detections
-        function fetchDetections() {
-            fetch(`${basePath}/api/detections`)
-                .then(response => response.json())
-                .then(data => {
-                    const detectionsList = document.getElementById('detections-list');
-                    detectionsList.innerHTML = ''; // Clear existing detections
-                    data.forEach(detection => {
-                        const li = document.createElement('li');
-                        li.innerHTML = detection.summary; // Use innerHTML to render HTML content
-
-                        if (detection.image_filenames && detection.image_filenames.length > 0) {
-                            // Add the "View Images" link
-                            const linkText = document.createTextNode(' - ');
-                            li.appendChild(linkText);
-
-                            const link = document.createElement('a');
-                            link.href = '#';
-                            link.textContent = 'View Images';
-                            link.onclick = function() {
-                                showImages(detection.image_filenames);
-                                return false;
-                            };
-                            li.appendChild(link);
-                        }
-
-                        detectionsList.appendChild(li);
-                    });
-                })
-                .catch(error => console.error('Error fetching detections:', error));
-        }
-
         // Function to fetch and update logs
         function fetchLogs() {
             fetch(`${basePath}/api/logs`)
@@ -1513,22 +1504,21 @@ def index():
         }
 
         // Set intervals to fetch data every 5 seconds
-        setInterval(() => {
-            fetchDetections();
-            fetchLogs();
-        }, 1000); // 5000 milliseconds = 5 seconds
+        // setInterval(() => {
+        //    fetchDetections();
+        //    fetchLogs();
+        // }, 1000); // 5000 milliseconds = 5 seconds
 
         // Also fetch current time every second for real-time update
         setInterval(() => {
             fetchCurrentTime();
         }, 1000); // 1000 milliseconds = 1 second
-
-        // Initial fetch when the page loads
-        document.addEventListener('DOMContentLoaded', () => {
-            fetchDetections();
-            fetchLogs();
-            fetchCurrentTime(); // Initial fetch
-        });
+                                  
+        // document.addEventListener('DOMContentLoaded', () => {
+        //     // fetchDetections();
+        //     fetchLogs();
+        //     fetchCurrentTime(); // Initial fetch
+        // });                                  
 
         // Handle form submission via AJAX to avoid page reload
         document.getElementById('graph-form').addEventListener('submit', function(event) {
