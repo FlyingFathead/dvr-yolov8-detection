@@ -1,7 +1,9 @@
+# old_web_server_no_waitress.py
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# a waitress-less version of
 # web_server.py
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Web server module for real-time YOLOv8 detection
-# https://github.com/FlyingFathead/dvr-yolov8-detection/
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Version number
 import version  # Import the version module
@@ -13,26 +15,19 @@ import os
 import signal
 import shutil
 
-from collections import deque, OrderedDict
-from datetime import datetime, date
+from collections import deque
+from datetime import datetime
 import threading
 import time
 from flask import Flask, Response, render_template_string, stream_with_context, request, jsonify
 from flask import send_from_directory
 from flask import send_file
 from werkzeug.utils import safe_join
-
-# threaded serving via waitress
-from waitress import serve 
-
 import cv2
 import logging
 from web_graph import generate_detection_graph
 import configparser
 import json
-
-# aggergation for the detections for webUI
-from collections import defaultdict
 
 # Configure logging for the web server
 logger = logging.getLogger('web_server')
@@ -104,7 +99,6 @@ ENABLE_WEBSERVER = config.getboolean('webserver', 'enable_webserver', fallback=T
 WEBSERVER_HOST = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
 WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
 WEBSERVER_MAX_FPS = config.getint('webserver', 'webserver_max_fps', fallback=10)
-MJPEG_QUALITY = config.getint('webserver', 'mjpeg_quality', fallback=75) # Read MJPEG quality for web preview
 WEBUI_COOLDOWN_AGGREGATION = config.getint('webui', 'webui_cooldown_aggregation', fallback=30)
 WEBUI_BOLD_THRESHOLD = config.getint('webui', 'webui_bold_threshold', fallback=10)
 # Read check_interval from config.ini with a fallback to 10
@@ -113,12 +107,9 @@ check_interval = config.getint('webserver', 'check_interval', fallback=10)
 # Persistent aggregated detections
 ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('aggregation', 'enable_persistent_aggregated_detections', fallback=False)
 AGGREGATED_DETECTIONS_FILE = config.get('aggregation', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
-
-# set the preview method and inform about it
+# set the preview method
 preview_method = config.get('webserver', 'preview_method', fallback='mjpeg')
 logger.info(f"Preview method set to: {preview_method}")
-if preview_method == 'mjpeg':
-    logger.info(f"MJPEG Quality set to: {MJPEG_QUALITY}") # Log the quality
 
 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
     logger.info(f"Persistent aggregated detections enabled. Logging to file: {AGGREGATED_DETECTIONS_FILE}")
@@ -325,8 +316,6 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
         SAVE_DIR_BASE = get_base_save_dir(config)
         logger.info(f"Initialized SAVE_DIR_BASE within web server: {SAVE_DIR_BASE}")
 
-    app.config['mjpeg_quality'] = config.getint('webserver', 'mjpeg_quality', fallback=75)
-
     app.config['SAVE_DIR_BASE'] = SAVE_DIR_BASE
 
     logger.info(f"SAVE_DIR_BASE is set to: {app.config['SAVE_DIR_BASE']}")
@@ -365,8 +354,6 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
     logger.info(f"Web Server Port: {port}")
     logger.info(f"Web Server Max FPS: {app.config['webserver_max_fps']}")
     logger.info(f"Preview Method: {preview_method}")
-    if preview_method == 'mjpeg':
-        logger.info(f"MJPEG Stream Quality: {app.config['mjpeg_quality']}")    
     logger.info(f"Check Interval: {config.getint('webserver', 'check_interval', fallback=10)} seconds")
     logger.info(f"Web UI Cooldown Aggregation: {config.getint('webui', 'webui_cooldown_aggregation', fallback=30)} seconds")
     logger.info(f"Web UI Bold Threshold: {config.getint('webui', 'webui_bold_threshold', fallback=10)}")
@@ -377,9 +364,7 @@ def start_web_server(host='0.0.0.0', port=5000, detection_log_path=None,
     logger.info("======================================================")
 
     # app.run(host=host, port=port, threaded=True)
-    # // old method
-    # app.run(host=host, port=port, threaded=True, use_reloader=False)    
-    serve(app, host=host, port=port, threads=8)
+    app.run(host=host, port=port, threaded=True, use_reloader=False)    
 
 def set_output_frame(frame):
     """Updates the global output frame to be served to clients."""
@@ -390,59 +375,49 @@ def set_output_frame(frame):
 def generate_frames():
     """Generator function that yields frames in byte format for streaming."""
     global output_frame
-    max_fps = app.config.get('webserver_max_fps', 10)
-    # --- ADDED: Get MJPEG Quality from app.config ---
-    mjpeg_quality = app.config.get('mjpeg_quality', 75) # Default to 75 if not found
-    # --- END ADDED ---
-
-    frame_interval = 1.0 / max_fps if max_fps > 0 else 0 # Allow 0 FPS to effectively disable limit
+    max_fps = app.config.get('webserver_max_fps', 10)  # Default to 10 FPS if not set
+    frame_interval = 1.0 / max_fps
     last_frame_time = time.time()
-
-    client_ip = request.remote_addr
-    logger.info(f"MJPEG Client Connected: {client_ip}. Max FPS: {max_fps}, Quality: {mjpeg_quality}")
-
     while True:
-        frame_copy = None
         with frame_lock:
-            if output_frame is not None:
+            if output_frame is None:
+                frame_copy = None
+            else:
+                # Make a copy of the frame
                 frame_copy = output_frame.copy()
-
+        
         if frame_copy is None:
-            time.sleep(0.05) # Wait if no frame available yet
+            # Sleep briefly to prevent 100% CPU utilization
+            time.sleep(0.01)
             continue
 
-        # --- FPS Limiting (applied BEFORE encoding) ---
+        # Limit the frame rate
         current_time = time.time()
-        elapsed_since_last = current_time - last_frame_time
-        if frame_interval > 0 and elapsed_since_last < frame_interval:
-             wait_time = frame_interval - elapsed_since_last
-             time.sleep(wait_time)
-        # Update time *after* potential sleep, *before* encoding
+        elapsed_time = current_time - last_frame_time
+        if elapsed_time < frame_interval:
+            time.sleep(frame_interval - elapsed_time)
         last_frame_time = time.time()
-        # --- End FPS Limiting ---
 
-        # Encode the frame in JPEG format *using the configured quality*
-        try:
-            encode_param = [cv2.IMWRITE_JPEG_QUALITY, mjpeg_quality]
-            ret, jpeg_buffer = cv2.imencode('.jpg', frame_copy, encode_param)
-            if not ret:
-                logger.warning("cv2.imencode failed, skipping frame.")
-                continue # Skip this frame if encoding fails
-            frame_bytes = jpeg_buffer.tobytes()
-        except Exception as e:
-             logger.error(f"Error during cv2.imencode: {e}")
-             continue # Skip frame on encoding error
+        # Encode the frame in JPEG format outside the lock
+        ret, jpeg = cv2.imencode('.jpg', frame_copy)
+        if not ret:
+            continue
+        frame_bytes = jpeg.tobytes()
 
         # Yield the output frame in byte format
         try:
             yield (b'--frame\r\n'
-                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         except GeneratorExit:
-            logger.info(f"MJPEG Client Disconnected (GeneratorExit): {client_ip}")
-            break # Client disconnected
+            # Client disconnected
+            break
         except Exception as e:
-            logger.error(f"Error yielding MJPEG frame to {client_ip}: {e}")
-            break # Other error during yield
+            logger.error(f"Error in streaming frames: {e}")
+            break
+
+# aggergation for the detections for webUI
+# At the beginning of the file
+from collections import defaultdict
 
 # Inside aggregation_thread_function
 def aggregation_thread_function(detections_list, detections_lock, cooldown=30, bold_threshold=10):
@@ -739,61 +714,6 @@ def get_detections():
 #     # Alternatively, return detections directly if they are already in the desired format
 #     # return jsonify(detections)
 
-def group_aggregations_by_date(aggregated_data):
-    """
-    Groups aggregator entries by date based on 'first_timestamp'.
-    Returns an OrderedDict like:
-        "Today (26. March 2026)" -> [list of aggregator items],
-        "Yesterday (25. March 2026)" -> [...],
-        "24. March 2026" -> [...], etc.
-    Most recent day first (descending by date).
-    """
-    # First, transform any string timestamps into real datetime objects
-    # so we can do date comparisons, sorting, etc.
-    # We'll store them in a new list to avoid messing up the original.
-    normalized = []
-    for item in aggregated_data:
-        # If we have a string timestamp, parse it. If it's already a datetime, keep it.
-        # (The aggregator logic might store them as strings once loaded from JSON.)
-        # We'll standardize on 'first_timestamp' for grouping.
-        if isinstance(item['first_timestamp'], str):
-            dt = datetime.strptime(item['first_timestamp'], "%Y-%m-%d %H:%M:%S")
-        else:
-            dt = item['first_timestamp']  # Already a datetime object
-        # Make a shallow copy of the item plus a normalized date
-        copy_item = dict(item)
-        copy_item['first_timestamp'] = dt
-        normalized.append(copy_item)
-
-    # Sort them by 'first_timestamp' descending (newest first)
-    sorted_data = sorted(normalized, key=lambda d: d['first_timestamp'], reverse=True)
-
-    # We'll group them in an OrderedDict
-    grouped = OrderedDict()
-
-    # Helper to produce date headings
-    def date_heading(dt: datetime):
-        # Compare dt.date() to today's date
-        day_date = dt.date()
-        today_date = date.today()
-        delta = (today_date - day_date).days
-
-        if delta == 0:
-            return f"Today ({day_date.strftime('%d. %B %Y')})"
-        elif delta == 1:
-            return f"Yesterday ({day_date.strftime('%d. %B %Y')})"
-        else:
-            return day_date.strftime("%d. %B %Y")
-
-    # Group them up
-    for item in sorted_data:
-        dt_label = date_heading(item['first_timestamp'])
-        if dt_label not in grouped:
-            grouped[dt_label] = []
-        grouped[dt_label].append(item)
-
-    return grouped
-
 @app.route('/api/logs')
 def get_logs():
     with app.config['logs_lock']:
@@ -808,9 +728,6 @@ def index():
         detections = list(aggregated_detections_list)
     with app.config['logs_lock']:
         logs = list(app.config['logs_list'])
-
-    # Group aggregator items by date
-    grouped_detections = group_aggregations_by_date(detections)
 
     # Get the selected time range from query parameters
     hours = request.args.get('hours', default=None, type=int)
@@ -1138,24 +1055,21 @@ def index():
         }
         </script>
     {% endif %}
-    
+
     <h2>Latest Detections</h2>
-    {% for date_label, day_items in grouped_detections.items() %}
-    <h3>{{ date_label }}</h3>
-    <ul>
-        {% for detection in day_items %}
-        <li>
-            {{ detection.summary | safe }}
-            {% if not detection.finalized %}
-            <em>(Ongoing)</em>
-            {% endif %}
-            {% if detection.image_filenames %}
-            - <a href="#" onclick="showImages({{ detection.image_filenames | tojson }}); return false;">View Images</a>
-            {% endif %}
-        </li>
+    <ul id="detections-list">
+        {% for detection in detections %}
+            <li>
+                {{ detection.summary | safe }}
+                {% if not detection.finalized %}
+                    <em>(Ongoing)</em>
+                {% endif %}
+                {% if detection.image_filenames %}
+                    - <a href="#" onclick="showImages({{ detection.image_filenames | tojson }}); return false;">View Images</a>
+                {% endif %}
+            </li>
         {% endfor %}
     </ul>
-    {% endfor %}
 
     <!-- Modal Structure -->
     <div id="image-modal">
@@ -1563,7 +1477,7 @@ def index():
                                   
 </body>
 </html>
-    ''', detections=detections, logs=logs, graph_image=graph_image, base_path=base_path, version=version_number, preview_method=preview_method, grouped_detections=grouped_detections)
+    ''', detections=detections, logs=logs, graph_image=graph_image, base_path=base_path, version=version_number, preview_method=preview_method)
 
 @app.route('/api/detection_graph/<int:hours>')
 def detection_graph_route(hours):
