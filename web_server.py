@@ -7,6 +7,7 @@
 import version  # Import the version module
 version_number = version.version_number
 
+import uuid
 import sys
 import subprocess
 import os
@@ -186,7 +187,6 @@ def start_hls_ffmpeg_if_needed():
         playlist_path
     ]
     logger.info("Starting HLS ffmpeg: " + " ".join(cmd))
-
     hls_process = subprocess.Popen(cmd)
 
 # on-request hls stopper
@@ -444,6 +444,8 @@ def generate_frames():
             logger.error(f"Error yielding MJPEG frame to {client_ip}: {e}")
             break # Other error during yield
 
+# aggergation thread function
+
 # Inside aggregation_thread_function
 def aggregation_thread_function(detections_list, detections_lock, cooldown=30, bold_threshold=10):
     global aggregated_detections_list, aggregated_lock  # Declare globals
@@ -474,8 +476,10 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                         image_filename_entry['detection_area'] = image_info['detection_area']
 
                     if current_aggregation is None:
-                        # Start a new aggregation
+                        # Start a new aggregation - ADD UUID HERE
+                        aggregation_uuid = str(uuid.uuid4()) # Generate a unique ID
                         current_aggregation = {
+                            'uuid': aggregation_uuid, # Store the UUID
                             'count': 1,
                             'first_timestamp': timestamp,
                             'latest_timestamp': timestamp,
@@ -487,6 +491,7 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                         with aggregated_lock:
                             # Prepend the current aggregation to the list
                             aggregated_detections_list.appendleft(current_aggregation)
+                            logger.debug(f"Started new aggregation with UUID: {aggregation_uuid}") # Optional logging
                     else:
                         # Update the ongoing aggregation
                         current_aggregation['count'] += 1
@@ -501,21 +506,97 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                 # Update the summary of the current aggregation
                 update_aggregation_summary(current_aggregation, cooldown, bold_threshold)
 
+                # Save potentially updated aggregation (including new images)
                 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
-                    save_aggregated_detections()
+                    save_aggregated_detections() # Save on updates too
 
             # Check if cooldown period has passed since the last detection
             if current_aggregation and last_detection_time and (time.time() - last_detection_time) >= cooldown:
                 # Mark current aggregation as finalized
                 current_aggregation['finalized'] = True
+                logger.debug(f"Finalized aggregation with UUID: {current_aggregation.get('uuid', 'N/A')}") # Optional logging
                 current_aggregation = None
                 last_detection_time = None
 
+                # Save finalized state
                 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
                     save_aggregated_detections()
 
         except Exception as e:
             logger.error(f"Error in aggregation_thread_function: {e}", exc_info=True)
+
+# # // old aggregation thread function
+# def aggregation_thread_function(detections_list, detections_lock, cooldown=30, bold_threshold=10):
+#     global aggregated_detections_list, aggregated_lock  # Declare globals
+#     last_detection_time = None
+#     current_aggregation = None  # To track ongoing aggregation
+
+#     while True:
+#         try:
+#             time.sleep(1)  # Check every second
+
+#             new_detections = []
+#             with detections_lock:
+#                 if detections_list:
+#                     new_detections.extend(detections_list)
+#                     detections_list.clear()
+
+#             if new_detections:
+#                 for detection in new_detections:
+#                     timestamp = datetime.strptime(detection['timestamp'], '%Y-%m-%d %H:%M:%S')
+#                     confidence = detection['confidence']
+#                     image_info = detection.get('image_filenames', {})
+
+#                     # Extract image filenames if they exist
+#                     image_filename_entry = {}
+#                     if 'full_frame' in image_info:
+#                         image_filename_entry['full_frame'] = image_info['full_frame']
+#                     if 'detection_area' in image_info:
+#                         image_filename_entry['detection_area'] = image_info['detection_area']
+
+#                     if current_aggregation is None:
+#                         # Start a new aggregation
+#                         current_aggregation = {
+#                             'count': 1,
+#                             'first_timestamp': timestamp,
+#                             'latest_timestamp': timestamp,
+#                             'lowest_confidence': confidence,
+#                             'highest_confidence': confidence,
+#                             'image_filenames': [image_filename_entry] if image_filename_entry else [],
+#                             'finalized': False
+#                         }
+#                         with aggregated_lock:
+#                             # Prepend the current aggregation to the list
+#                             aggregated_detections_list.appendleft(current_aggregation)
+#                     else:
+#                         # Update the ongoing aggregation
+#                         current_aggregation['count'] += 1
+#                         current_aggregation['latest_timestamp'] = max(current_aggregation['latest_timestamp'], timestamp)
+#                         current_aggregation['lowest_confidence'] = min(current_aggregation['lowest_confidence'], confidence)
+#                         current_aggregation['highest_confidence'] = max(current_aggregation['highest_confidence'], confidence)
+#                         if image_filename_entry:
+#                             current_aggregation['image_filenames'].append(image_filename_entry)
+
+#                     last_detection_time = time.time()
+
+#                 # Update the summary of the current aggregation
+#                 update_aggregation_summary(current_aggregation, cooldown, bold_threshold)
+
+#                 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
+#                     save_aggregated_detections()
+
+#             # Check if cooldown period has passed since the last detection
+#             if current_aggregation and last_detection_time and (time.time() - last_detection_time) >= cooldown:
+#                 # Mark current aggregation as finalized
+#                 current_aggregation['finalized'] = True
+#                 current_aggregation = None
+#                 last_detection_time = None
+
+#                 if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
+#                     save_aggregated_detections()
+
+#         except Exception as e:
+#             logger.error(f"Error in aggregation_thread_function: {e}", exc_info=True)
 
 def update_aggregation_summary(current_aggregation, cooldown, bold_threshold):
     count_display = f"<strong>{current_aggregation['count']}</strong>" if current_aggregation['count'] >= bold_threshold else f"{current_aggregation['count']}"
@@ -719,6 +800,32 @@ def get_detections():
     response.headers['Expires'] = '0'
     return response
 
+# uuid image route
+@app.route('/api/detection_images/<uuid_str>', methods=['GET'])
+def get_detection_images(uuid_str):
+    """API endpoint to get image filenames for a specific aggregated detection."""
+    logger.debug(f"Request received for images of detection UUID: {uuid_str}")
+    found_images = None
+    with aggregated_lock:
+        # Iterate through the deque to find the matching UUID
+        for item in aggregated_detections_list:
+            # Ensure the item has a UUID key before comparing
+            if item.get('uuid') == uuid_str:
+                found_images = item.get('image_filenames', []) # Get filenames or empty list
+                break # Found it, no need to continue searching
+
+    if found_images is not None:
+        logger.debug(f"Found {len(found_images)} images for UUID: {uuid_str}")
+        response = jsonify(found_images)
+        # Prevent caching of this dynamic data
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        return response
+    else:
+        logger.warning(f"Detection with UUID {uuid_str} not found in aggregated list.")
+        return jsonify({"error": "Detection not found"}), 404
+
 # // (old method)
 # @app.route('/api/detections')
 # def get_detections():
@@ -884,17 +991,20 @@ def index():
         }
 
         #modal-image {
-            user-drag: none;
-            user-select: none;                                  
-            cursor: zoom-in;
-        }
+            user-drag: none;        /* Prevent dragging */
+            user-select: none;      /* Prevent text selection */
+            cursor: zoom-in;        /* Indicate clickable */
+            
+            /* === ADDED/MODIFIED CONSTRAINTS === */
+            display: block;         /* Ensure it behaves like a block element */
+            max-width: 90vw;        /* Max 90% of viewport width */
+            max-height: 75vh;       /* Max 75% of viewport height (leaves room for controls) */
+            object-fit: contain;    /* Scale image down to fit container, maintaining aspect ratio */
+            /* === END ADDED/MODIFIED CONSTRAINTS === */
 
-        #image-modal img {
-            max-width: 100%;
-            max-height: 70%;
-            margin-bottom: 10px;
+            margin-bottom: 10px;    /* Keep existing margin */
         }
-
+                                  
         /* CSS for the X button */
         /* Adjust the close icon (X button) */
         #image-modal span {
@@ -1071,10 +1181,7 @@ def index():
 
 </head>
 <body>
-    <script>
-    const basePath = "{{ base_path }}";
-    </script>                                  
-
+                                  
     <!-- Time Display Container -->
     <div id="time-container">
         <strong>Current Host Time:</strong> <span id="host-time">Loading...</span>
@@ -1099,24 +1206,6 @@ def index():
     .catch(err => console.error('Error toggling preview:', err));
     });
     </script> --!>
-
-    <script>
-    document.addEventListener('click', function(e) {
-    if (e.target.matches('.view-images-btn')) {
-        // Grab the JSON from the data-images attribute
-        const jsonStr = e.target.getAttribute('data-images');
-        let imageFilenames;
-        try {
-        imageFilenames = JSON.parse(jsonStr);
-        } catch (err) {
-        console.error("Bad JSON in data-images:", err);
-        return;
-        }
-        // Then call your existing function
-        showImages(imageFilenames);
-    }
-    });
-    </script>                                  
 
     {% if preview_method == "mjpeg" %}
         <h2>(MJPEG Preview)</h2>
@@ -1167,10 +1256,11 @@ def index():
             {% if not detection.finalized %}
             <em>(Ongoing)</em>
             {% endif %}
-            {% if detection.image_filenames %}
-            <button 
+            {# Check if there are images AND if the detection has a UUID #}
+            {% if detection.image_filenames and detection.uuid %}
+            <button
                 class="view-images-btn"
-                data-images='{{ detection.image_filenames | tojson|safe }}'
+                data-detection-uuid="{{ detection.uuid }}" {# <-- CHANGED: Use UUID #}
             >
                 View Images
             </button>
@@ -1234,13 +1324,16 @@ def index():
         </div>
     {% endif %}
 
-    <script>
+      
+<script>
         // Global variables
+        const basePath = "{{ base_path }}"; // Define basePath early
         let modalOpen = false;
         let currentIndex = 0;
         let imageFilenames = [];
         let showFullFrame = true;
-                          
+
+        // DOM Element references (grab them once for efficiency)
         const loadingSpinner = document.getElementById('loading-spinner');
         const modal = document.getElementById('image-modal');
         const modalContent = document.getElementById('modal-content');
@@ -1249,8 +1342,20 @@ def index():
         const imageCountElement = document.getElementById('image-count');
         const prevButton = document.getElementById('prev-button');
         const nextButton = document.getElementById('next-button');
+        const firstButton = document.getElementById('first-button');
+        const skipBackButton = document.getElementById('skip-back-button');
+        const skipForwardButton = document.getElementById('skip-forward-button');
+        const lastButton = document.getElementById('last-button');
+        const logsListElement = document.getElementById('logs-list');
+        const hostTimeElement = document.getElementById('host-time');
+        const graphForm = document.getElementById('graph-form');
+        const graphContainer = document.getElementById('detection-graph');
+        const hoursSelect = document.getElementById('hours');
+        const modalCloseButton = document.querySelector('#image-modal span'); // Get close button
 
-        // Function to clear excessive error messages
+        // === FUNCTION DEFINITIONS START ===
+
+        // Function to clear excessive error messages in modal
         function clearErrorMessage() {
             const errorMessage = document.getElementById('error-message');
             if (errorMessage) {
@@ -1258,235 +1363,104 @@ def index():
             }
         }
 
+        // Function to display the modal with images
         function showImages(images) {
             console.log('showImages called with:', images);
             imageFilenames = images;
             currentIndex = 0;
-            showFullFrame = false; // Start with detection area images
+
+            // *** CORRECTED LOGIC: Default to detection_area (showFullFrame = false) ***
+            showFullFrame = false; // Default to showing detection area
+
+            // Check the *first* image. If detection_area is MISSING, but full_frame EXISTS,
+            // then switch the default to show full_frame instead.
+            if (imageFilenames.length > 0) {
+                const firstImageInfo = imageFilenames[0];
+                if (!firstImageInfo.detection_area && firstImageInfo.full_frame) {
+                    console.log("First image missing detection_area, defaulting to full_frame");
+                    showFullFrame = true;
+                } else if (!firstImageInfo.detection_area && !firstImageInfo.full_frame) {
+                    console.warn("First image missing both detection_area and full_frame!");
+                    // Keep showFullFrame as false, showImage will handle missing file
+                }
+            }
+            // *** END OF CORRECTED LOGIC ***
 
             modal.style.display = 'flex';
-            showImage(currentIndex);
+            showImage(currentIndex); // Load the image based on the determined showFullFrame state
             modalOpen = true;
         }
 
+        // Function to load and display a specific image in the modal
         function showImage(index) {
+            if (!imageFilenames || index < 0 || index >= imageFilenames.length) {
+                console.error('showImage: Invalid index or imageFilenames not set', index, imageFilenames);
+                return;
+            }
+
             const imageInfo = imageFilenames[index];
-            console.log('imageInfo:', imageInfo);
+            console.log('Showing image at index:', index, 'Info:', imageInfo);
             let filename = null;
 
+            // Determine which filename to use (full_frame or detection_area)
             if (showFullFrame && imageInfo.full_frame) {
                 filename = imageInfo.full_frame;
             } else if (!showFullFrame && imageInfo.detection_area) {
                 filename = imageInfo.detection_area;
-            } else if (imageInfo.full_frame || imageInfo.detection_area) {
-                // Fallback to whichever image is available
-                filename = imageInfo.full_frame || imageInfo.detection_area;
             } else {
-                console.error('No valid image filename found for:', imageInfo);
-                return; // Exit the function if no valid filename
+                // Fallback: use whichever is available, preferring full_frame
+                filename = imageInfo.full_frame || imageInfo.detection_area;
+                // Update showFullFrame state if we fell back
+                if (filename === imageInfo.full_frame) showFullFrame = true;
+                else if (filename === imageInfo.detection_area) showFullFrame = false;
             }
 
-            console.log('Loading image:', filename);
+            if (!filename) {
+                 console.error('No valid image filename found for index:', index, 'Image info:', imageInfo);
+                 loadingSpinner.style.display = 'none'; // Hide spinner if no filename
+                 modalImage.src = ''; // Clear image
+                 modalImage.alt = 'Image not available.';
+                 imageCountElement.textContent = `Image ${index + 1} of ${imageFilenames.length} (Not Available)`;
+                 clearErrorMessage(); // Clear previous errors
+                 return;
+            }
 
-            // Show loading spinner
+            console.log('Loading image:', filename, 'showFullFrame:', showFullFrame);
+
+            // Show loading spinner, clear previous errors/image
             loadingSpinner.style.display = 'block';
-
-            // Clear any existing error messages
+            modalImage.src = ''; // Clear previous image immediately
+            modalImage.alt = 'Loading...';
             clearErrorMessage();
 
             // Update the image count display
             imageCountElement.textContent = `Image ${index + 1} of ${imageFilenames.length}`;
 
-            // Set the event handlers
-            modalImage.onload = function() {
-                loadingSpinner.style.display = 'none';
-                clearErrorMessage();
-            };
-
-            // Open the detection image in a new window when clicked on
-            modalImage.onclick = function() {
-                window.open(modalImage.src, '_blank');
-            };
-                                                                    
-            modalImage.onerror = function() {
-                // Check if src is not empty to prevent false errors
-                if (modalImage.src) {
-                    loadingSpinner.style.display = 'none';
-                    modalImage.alt = 'Failed to load image.';
-
-                    console.error('Failed to load image:', modalImage.src);
-
-                    let errorMessage = document.getElementById('error-message');
-                    if (!errorMessage) {
-                        errorMessage = document.createElement('div');
-                        errorMessage.id = 'error-message';
-                        errorMessage.style.color = 'white';
-                        errorMessage.style.marginTop = '10px';
-                        errorMessage.textContent = 'Failed to load image. Please try again later.';
-                        modalContent.appendChild(errorMessage);
-                    }
-                }
-            };
-
-            // Set the image source to start loading
-            modalImage.src = `${basePath}/api/detections/${encodeURI(filename)}`;
+            // Construct URL, avoiding double slashes
+            const imageURL = `${basePath.replace(/\/$/, '')}/api/detections/${encodeURI(filename)}`;
+            modalImage.src = imageURL;
         }
 
-        modalImage.onload = function() {
-            loadingSpinner.style.display = 'none';
-            clearErrorMessage();
-        };
-
-        modalImage.onerror = function() {
-            loadingSpinner.style.display = 'none';
-            modalImage.alt = 'Failed to load image.';
-
-            console.error('Failed to load image:', modalImage.src);
-
-            let errorMessage = document.getElementById('error-message');
-            if (!errorMessage) {
-                errorMessage = document.createElement('div');
-                errorMessage.id = 'error-message';
-                errorMessage.style.color = 'white';
-                errorMessage.style.marginTop = '10px';
-                errorMessage.textContent = 'Failed to load image. Please try again later.';
-                modalContent.appendChild(errorMessage);
-            }
-        };
-
-        swapButton.onclick = function() {
-            console.log("Swap button clicked");
-            showFullFrame = !showFullFrame;
-            showImage(currentIndex);
-        };
-
-        prevButton.onclick = function() {
-            console.log("Previous button clicked");
-            if (currentIndex > 0) {
-                currentIndex--;
-                showImage(currentIndex);
-            }
-        };
-
-        nextButton.onclick = function() {
-            console.log("Next button clicked");
-            if (currentIndex < imageFilenames.length - 1) {
-                currentIndex++;
-                showImage(currentIndex);
-            }
-        };
-
-        document.getElementById('first-button').onclick = function() {
-        console.log("First image button clicked");
-        if (imageFilenames && imageFilenames.length > 0) {
-            currentIndex = 0;
-            showImage(currentIndex);
-        }
-        };
-
-        document.getElementById('skip-back-button').onclick = function() {
-        console.log("Skip back 10 button clicked");
-        if (imageFilenames && imageFilenames.length > 0) {
-            // Subtract 10, but don’t go below 0
-            currentIndex = Math.max(currentIndex - 10, 0);
-            showImage(currentIndex);
-        }
-        };
-
-        document.getElementById('skip-forward-button').onclick = function() {
-        console.log("Skip forward 10 button clicked");
-        if (imageFilenames && imageFilenames.length > 0) {
-            // Add 10, but don’t go past the last image
-            currentIndex = Math.min(currentIndex + 10, imageFilenames.length - 1);
-            showImage(currentIndex);
-        }
-        };
-                                  
-        document.getElementById('last-button').onclick = function() {
-        console.log("Last image button clicked");
-        if (imageFilenames && imageFilenames.length > 0) {
-            currentIndex = imageFilenames.length - 1;
-            showImage(currentIndex);
-        }
-        };
-
+        // Function to close the image modal
         function closeModal() {
             modal.style.display = 'none';
             modalOpen = false;
+            modalImage.src = ''; // Clear image src
+            imageFilenames = []; // Clear the stored filenames
+            clearErrorMessage(); // Clear any lingering errors
         }
 
-        // Close modal when clicking outside modal content
-        modal.addEventListener('click', function(event) {
-            if (event.target === modal) {
-                closeModal();
-            }
-        });
-
-        // Attach the keydown event listener once
-        document.addEventListener('keydown', function(event) {
-            if (!modalOpen) {
-                return;
-            }
-            if (event.keyCode === 37) { // Left arrow
-                if (currentIndex > 0) {
-                    currentIndex--;
-                    showImage(currentIndex);
-                }
-            } else if (event.keyCode === 39) { // Right arrow
-                if (currentIndex < imageFilenames.length - 1) {
-                    currentIndex++;
-                    showImage(currentIndex);
-                }
-            } else if (event.keyCode === 27) { // Escape key
-                closeModal();
-            }
-        });
-
-        // Implement swipe gestures for mobile devices
-        let touchStartX = null;
-
-        modal.addEventListener('touchstart', function(event) {
-            touchStartX = event.changedTouches[0].screenX;
-        }, false);
-
-        modal.addEventListener('touchend', function(event) {
-            if (touchStartX === null) {
-                return;
-            }
-
-            let touchEndX = event.changedTouches[0].screenX;
-            let diffX = touchStartX - touchEndX;
-
-            if (Math.abs(diffX) > 30) { // Swipe threshold
-                if (diffX > 0) {
-                    // Swipe left - Next image
-                    if (currentIndex < imageFilenames.length - 1) {
-                        currentIndex++;
-                        showImage(currentIndex);
-                    }
-                } else {
-                    // Swipe right - Previous image
-                    if (currentIndex > 0) {
-                        currentIndex--;
-                        showImage(currentIndex);
-                    }
-                }
-            }
-
-            touchStartX = null;
-        }, false);
-
-        // Function to fetch and update logs
+        // Function to fetch and update logs (if needed dynamically)
         function fetchLogs() {
-            fetch(`${basePath}/api/logs`)
+            const logsURL = `${basePath.replace(/\/$/, '')}/api/logs`;
+            fetch(logsURL)
                 .then(response => response.json())
                 .then(data => {
-                    const logsList = document.getElementById('logs-list');
-                    logsList.innerHTML = ''; // Clear existing logs
+                    logsListElement.innerHTML = ''; // Clear existing logs
                     data.forEach(log => {
                         const li = document.createElement('li');
                         li.textContent = log;
-                        logsList.appendChild(li);
+                        logsListElement.appendChild(li);
                     });
                 })
                 .catch(error => console.error('Error fetching logs:', error));
@@ -1494,57 +1468,334 @@ def index():
 
         // Function to fetch and update current host time
         function fetchCurrentTime() {
-            fetch(`${basePath}/api/current_time`)
-                .then(response => response.json())
+             const timeURL = `${basePath.replace(/\/$/, '')}/api/current_time`;
+            fetch(timeURL)
+                .then(response => {
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return response.json();
+                 })
                 .then(data => {
-                    const hostTimeElement = document.getElementById('host-time');
-                    hostTimeElement.textContent = data.current_time;
+                    if (hostTimeElement) {
+                        hostTimeElement.textContent = data.current_time;
+                    }
                 })
-                .catch(error => console.error('Error fetching current time:', error));
+                .catch(error => {
+                    console.error('Error fetching current time:', error);
+                     if (hostTimeElement) {
+                        hostTimeElement.textContent = 'Error'; // Indicate error
+                    }
+                });
         }
 
-        // Set intervals to fetch data every 5 seconds
-        // setInterval(() => {
-        //    fetchDetections();
-        //    fetchLogs();
-        // }, 1000); // 5000 milliseconds = 5 seconds
+        // === FUNCTION DEFINITIONS END ===
 
-        // Also fetch current time every second for real-time update
-        setInterval(() => {
-            fetchCurrentTime();
-        }, 1000); // 1000 milliseconds = 1 second
-                                  
-        // document.addEventListener('DOMContentLoaded', () => {
-        //     // fetchDetections();
-        //     fetchLogs();
-        //     fetchCurrentTime(); // Initial fetch
-        // });                                  
 
-        // Handle form submission via AJAX to avoid page reload
-        document.getElementById('graph-form').addEventListener('submit', function(event) {
-            event.preventDefault(); // Prevent the default form submission
-            const hours = document.getElementById('hours').value;
-            // Fetch the graph image via AJAX
-            fetch(`${basePath}/api/detection_graph/${hours}`)
+        // === EVENT LISTENERS START ===
+
+        // --- Main click listener (delegated for 'View Images' buttons) ---
+        document.addEventListener('click', function(e) {
+            // --- 'View Images' button click ---
+            if (e.target.matches('.view-images-btn')) {
+                const button = e.target; // Keep reference to the button
+                const detectionUUID = button.getAttribute('data-detection-uuid');
+                if (!detectionUUID) {
+                    console.error("Button is missing data-detection-uuid attribute");
+                    alert("Could not load images: Missing detection identifier.");
+                    return;
+                }
+
+                button.textContent = 'Loading...';
+                button.disabled = true;
+
+                console.log(`Fetching images for detection UUID: ${detectionUUID}`);
+
+                // Construct URL carefully, avoiding double slashes
+                const fetchURL = `${basePath.replace(/\/$/, '')}/api/detection_images/${detectionUUID}`;
+
+                fetch(fetchURL)
+                    .then(response => {
+                        if (!response.ok) {
+                            // Try to parse JSON error first, fallback to status text
+                            return response.json()
+                                .then(errData => { throw new Error(`HTTP ${response.status}: ${errData.error || 'Server error'}`); })
+                                .catch(() => { throw new Error(`HTTP error ${response.status}`); }); // Fallback if error isn't JSON
+                        }
+                        return response.json();
+                    })
+                    .then(fetchedImageFilenames => {
+                        if (fetchedImageFilenames && Array.isArray(fetchedImageFilenames)) {
+                            if (fetchedImageFilenames.length > 0) {
+                                showImages(fetchedImageFilenames); // Call showImages with the fetched list
+                            } else {
+                                console.warn(`No images found for detection ${detectionUUID}.`);
+                                alert("No images are associated with this detection event.");
+                            }
+                        } else {
+                            console.error("Received invalid data instead of image list:", fetchedImageFilenames);
+                            throw new Error("Invalid data received from server.");
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Error fetching or processing image list:", err);
+                        alert(`Could not load images: ${err.message}.`);
+                    })
+                    .finally(() => {
+                        // Reset button state only if it still exists in the DOM
+                        if (document.body.contains(button)) {
+                             button.textContent = 'View Images';
+                             button.disabled = false;
+                        }
+                    });
+            }
+        });
+        // --- END Main click listener ---
+
+        // --- Modal Image Load/Error Handlers ---
+         modalImage.onload = function() {
+            loadingSpinner.style.display = 'none';
+            clearErrorMessage();
+         };
+
+         modalImage.onerror = function() {
+            // Check if src is not empty and not just the base URL to prevent false errors
+            if (modalImage.src && !modalImage.src.endsWith(window.location.pathname)) {
+                loadingSpinner.style.display = 'none';
+                modalImage.alt = 'Failed to load image.';
+                console.error('Failed to load image:', modalImage.src);
+
+                let errorMessage = document.getElementById('error-message');
+                if (!errorMessage) {
+                    errorMessage = document.createElement('div');
+                    errorMessage.id = 'error-message';
+                    errorMessage.style.color = 'red'; // Make error obvious
+                    errorMessage.style.marginTop = '10px';
+                    errorMessage.style.padding = '5px';
+                    errorMessage.style.backgroundColor = 'rgba(0,0,0,0.7)'; // Dark background for text
+                    errorMessage.style.borderRadius = '3px';
+                    errorMessage.style.fontWeight = 'bold';
+                    // Insert after the image, before the count
+                    modalContent.insertBefore(errorMessage, imageCountElement);
+                }
+                 errorMessage.textContent = 'Failed to load image.';
+            } else {
+                 // Ignore error if src was empty (e.g., on modal close/clear)
+                 loadingSpinner.style.display = 'none';
+                 modalImage.alt = ''; // Clear alt text
+            }
+         };
+
+        // --- Modal Button Listeners ---
+        swapButton.onclick = function() {
+            showFullFrame = !showFullFrame;
+            showImage(currentIndex); // Reload current index with new type
+        };
+
+        prevButton.onclick = function() {
+            if (currentIndex > 0) {
+                currentIndex--;
+                showImage(currentIndex);
+            }
+        };
+
+        nextButton.onclick = function() {
+            if (currentIndex < imageFilenames.length - 1) {
+                currentIndex++;
+                showImage(currentIndex);
+            }
+        };
+
+        firstButton.onclick = function() {
+            if (imageFilenames.length > 0) {
+                currentIndex = 0;
+                showImage(currentIndex);
+            }
+        };
+
+        skipBackButton.onclick = function() {
+            if (imageFilenames.length > 0) {
+                currentIndex = Math.max(currentIndex - 10, 0);
+                showImage(currentIndex);
+            }
+        };
+
+        skipForwardButton.onclick = function() {
+            if (imageFilenames.length > 0) {
+                currentIndex = Math.min(currentIndex + 10, imageFilenames.length - 1);
+                showImage(currentIndex);
+            }
+        };
+
+        lastButton.onclick = function() {
+            if (imageFilenames.length > 0) {
+                currentIndex = imageFilenames.length - 1;
+                showImage(currentIndex);
+            }
+        };
+
+        // Open image in new tab on click (ensure src is valid first)
+         modalImage.onclick = function() {
+             if (modalImage.src && !modalImage.src.endsWith(window.location.pathname)) {
+                window.open(modalImage.src, '_blank');
+             }
+         };
+
+        // Close modal using the 'X' button
+        if (modalCloseButton) {
+             modalCloseButton.onclick = closeModal; // Use the function directly
+        }
+
+        // Close modal when clicking on the background overlay
+        modal.addEventListener('click', function(event) {
+            if (event.target === modal) { // Check if the click was *directly* on the modal background
+                closeModal();
+            }
+        });
+
+        // --- Keyboard navigation for modal ---
+        document.addEventListener('keydown', function(event) {
+            if (!modalOpen) {
+                return; // Only handle keys if modal is open
+            }
+            let handled = false;
+            switch (event.key) {
+                case 'ArrowLeft':
+                    prevButton.onclick(); // Simulate button click
+                    handled = true;
+                    break;
+                case 'ArrowRight':
+                    nextButton.onclick(); // Simulate button click
+                    handled = true;
+                    break;
+                case 'Escape':
+                    closeModal();
+                    handled = true;
+                    break;
+                case 'Home':
+                     firstButton.onclick();
+                     handled = true;
+                     break;
+                case 'End':
+                     lastButton.onclick();
+                     handled = true;
+                     break;
+                // Add PageUp/PageDown for skip?
+                case 'PageDown':
+                     skipForwardButton.onclick();
+                     handled = true;
+                     break;
+                case 'PageUp':
+                     skipBackButton.onclick();
+                     handled = true;
+                     break;
+                 case ' ': // Spacebar to toggle type?
+                     swapButton.onclick();
+                     handled = true;
+                     break;
+            }
+            if (handled) {
+                 event.preventDefault(); // Prevent default browser action (like scrolling) for handled keys
+            }
+        });
+
+        // --- Swipe gestures for modal (touch devices) ---
+        let touchStartX = null;
+        let touchStartY = null; // To distinguish scroll from swipe
+        modal.addEventListener('touchstart', function(event) {
+            if (event.touches.length === 1) { // Only care about single touch swipes
+                touchStartX = event.touches[0].clientX; // Use clientX for horizontal position
+                touchStartY = event.touches[0].clientY;
+            } else {
+                touchStartX = null;
+                touchStartY = null;
+            }
+        }, { passive: true }); // Passive listener for starting touch
+
+        modal.addEventListener('touchend', function(event) {
+            if (touchStartX === null || touchStartY === null || event.changedTouches.length !== 1) {
+                return; // Not a valid single touch swipe sequence
+            }
+
+            let touchEndX = event.changedTouches[0].clientX;
+            let touchEndY = event.changedTouches[0].clientY;
+            let diffX = touchStartX - touchEndX;
+            let diffY = touchStartY - touchEndY;
+            const swipeThreshold = 50; // Minimum horizontal movement for swipe
+            const verticalThreshold = 75; // Max vertical movement allowed for horizontal swipe
+
+            // Check if it's primarily a horizontal swipe and exceeds threshold
+            if (Math.abs(diffX) > swipeThreshold && Math.abs(diffY) < verticalThreshold) {
+                if (diffX > 0) { // Swiped left (finger moved left -> content moves left -> next image)
+                    nextButton.onclick(); // Simulate next click
+                } else { // Swiped right (finger moved right -> content moves right -> previous image)
+                    prevButton.onclick(); // Simulate prev click
+                }
+                 // Optionally prevent default if the swipe was handled, though touchend is tricky
+            }
+
+            // Reset for next potential swipe
+            touchStartX = null;
+            touchStartY = null;
+        }, false); // Not passive because we might *implicitly* be preventing scroll if swipe detected
+
+
+        // --- Graph form submission ---
+        graphForm.addEventListener('submit', function(event) {
+            event.preventDefault(); // Prevent default page reload
+            const hours = hoursSelect.value;
+            const graphURL = `${basePath.replace(/\/$/, '')}/api/detection_graph/${hours}`;
+
+            // Show loading state for graph
+            graphContainer.innerHTML = '<h3>Detections Over Time</h3><p>Loading graph...</p>';
+
+            fetch(graphURL)
                 .then(response => {
                     if (!response.ok) {
-                        throw new Error('Network response was not ok');
+                        return response.text().then(text => {
+                             throw new Error(`HTTP ${response.status}: ${text || 'Failed to load graph'}`);
+                        });
                     }
-                    return response.text();
+                    return response.text(); // Expecting HTML fragment with <img> tag or error <p>
                 })
                 .then(html => {
-                    const graphContainer = document.getElementById('detection-graph');
+                    // Inject the fetched HTML (contains the img tag or error message)
                     graphContainer.innerHTML = '<h3>Detections Over Time</h3>' + html;
                 })
                 .catch(error => {
                     console.error('Error fetching graph:', error);
-                    // Display the error message in the graph container
-                    const graphContainer = document.getElementById('detection-graph');
-                    graphContainer.innerHTML = '<h3>Detections Over Time</h3><p style="color: red; font-weight: bold;">Failed to load detection graph.</p>';
+                    graphContainer.innerHTML = `<h3>Detections Over Time</h3><p style="color: red; font-weight: bold;">Failed to load detection graph: ${error.message}</p>`;
                 });
         });
+
+        // === EVENT LISTENERS END ===
+
+
+        // === INTERVAL TIMERS ===
+        // Fetch current time every second
+        const timeIntervalId = setInterval(fetchCurrentTime, 1000);
+
+        // Optional: Fetch logs periodically (Example)
+        // const logIntervalId = setInterval(fetchLogs, 30000); // e.g., every 30 seconds
+
+        // === INITIAL ACTIONS ===
+        // Fetch time immediately on page load
+        fetchCurrentTime();
+
+        // Optional: Fetch logs immediately on page load (if needed beyond server render)
+        // fetchLogs();
+
+        // Optional: Trigger graph load for default selection on page load
+        // graphForm.dispatchEvent(new Event('submit'));
+
+
+        // === CLEANUP (Optional) ===
+        // Example: Clear intervals if the page were being unloaded in a SPA context
+        // window.addEventListener('unload', () => {
+        //    clearInterval(timeIntervalId);
+        //    clearInterval(logIntervalId);
+        // });
+
     </script>
-                                  
+                                      
     <!-- Horizontal Rule and Footer with Version Number -->
     <hr>
     <footer>

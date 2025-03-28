@@ -284,8 +284,18 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **0.1622**
+  - **Feature: Implemented Lazy Loading for Web UI Detection Images.**
+    - Aggregated detection entries are now assigned unique UUIDs during processing and persistence.
+    - The main web UI (`/`) now sends only detection summaries initially, significantly reducing the initial page load size and improving performance, especially on slow connections.
+    - The list of image filenames (`full_frame`, `detection_area`) for a specific aggregated detection is now fetched *on-demand* when the user clicks its "View Images" button.
+    - Added a new API endpoint `/api/detection_images/<uuid>` to serve image lists for individual detections.
+    - Updated frontend JavaScript to handle fetching image lists via the new API before displaying the image carousel.
+  - **Fix:** Image carousel now correctly defaults to showing the `detection_area` image first (if available), only showing `full_frame` initially if `detection_area` is missing or upon user clicking the "Swap Type" button.
+  - **Fix:** Adjusted CSS (`max-width`, `max-height`, `object-fit`) for the modal image (`#modal-image`) to ensure both `detection_area` and larger `full_frame` images are properly constrained within the viewport without overflow.
+  - **Util:** Added `utils/uuid_inserter.py` script. This utility can process an existing `aggregated_detections.json` file (specified via command line or loaded from `config.ini`), creates a backup, and adds missing UUIDs to older entries, allowing them to be compatible with the new lazy-load
 - **v0.1621**
-  **Web server updates:**
+  - **Web server updates:**
   - Switched to use `waitress` (`pip install -U waitress` or use the `requirements.txt`)
   - `waitress` = better threading and multitasking with `Flask`
   - MJPEG preview quality in webUI previews now configurable from `config.ini`
