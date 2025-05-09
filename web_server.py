@@ -155,6 +155,21 @@ connected_clients = {}
 # Initialize the lock for connected_clients
 connected_clients_lock = threading.Lock()
 
+# --- relative path helper -----
+def _expected_video_relpath(save_root, ts: datetime) -> str:
+    """
+    Build   2025/05/09/20250509-180433.mp4
+    from    datetime(2025, 5, 9, 18, 4, 33)
+    using the same rules as DVRRecorder.
+    """
+    return os.path.join(
+        ts.strftime("%Y"),
+        ts.strftime("%m"),
+        ts.strftime("%d"),
+        ts.strftime("%Y%m%d-%H%M%S") + ".mp4",
+    )
+# ------------------------------------------------------------------------
+
 # on-request HLS streaming
 def start_hls_ffmpeg_if_needed():
     global hls_process
@@ -479,6 +494,11 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                     if current_aggregation is None:
                         # Start a new aggregation - ADD UUID HERE
                         aggregation_uuid = str(uuid.uuid4()) # Generate a unique ID
+
+                        save_root = app.config.get('SAVE_DIR_BASE', './yolo_detections')
+                        guessed_rel = _expected_video_relpath(
+                            os.path.join(save_root, 'video'), timestamp)
+
                         current_aggregation = {
                             'uuid': aggregation_uuid, # Store the UUID
                             'count': 1,
@@ -487,7 +507,7 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                             'lowest_confidence': confidence,
                             'highest_confidence': confidence,
                             'image_filenames': [image_filename_entry] if image_filename_entry else [],
-                            'video_filename': video_filename,                            
+                            'video_filename'  : video_filename or guessed_rel,
                             'finalized': False
                         }
                         with aggregated_lock:
@@ -502,8 +522,10 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                         current_aggregation['highest_confidence'] = max(current_aggregation['highest_confidence'], confidence)
                         if image_filename_entry:
                             current_aggregation['image_filenames'].append(image_filename_entry)
-                        if video_filename and not current_aggregation.get('video_filename'):
-                            current_aggregation['video_filename'] = video_filename
+                        # if video_filename and not current_aggregation.get('video_filename'):
+                        #     current_aggregation['video_filename'] = video_filename
+                        if video_filename:
+                            current_aggregation['video_filename'] = video_filename                        
 
                     last_detection_time = time.time()
 
@@ -793,18 +815,35 @@ def hls_files(filename):
 
 @app.route('/api/videos/<path:filename>')
 def serve_video(filename):
-    base = app.config.get('SAVE_DIR_BASE', './yolo_detections')
-    video_root = os.path.join(base, 'video')
-    filepath   = os.path.abspath(os.path.join(video_root, filename))
+    base        = app.config.get('SAVE_DIR_BASE', './yolo_detections')
+    video_root  = os.path.join(base, 'video')
+    video_root  = os.path.abspath(video_root)
 
-    # stop “../” traversal
-    if not filepath.startswith(os.path.abspath(video_root)):
+    # ── build an absolute path no matter what we got ──────────────────────
+    filepath = os.path.abspath(filename) if os.path.isabs(filename) \
+              else os.path.abspath(os.path.join(video_root, filename))
+
+    # keep the traversal-protection
+    if not filepath.startswith(video_root):
         return "Forbidden", 403
-
     if os.path.isfile(filepath):
         return send_file(filepath, as_attachment=False)
-    else:
-        return "Not found", 404
+    return "Not found", 404
+
+# @app.route('/api/videos/<path:filename>')
+# def serve_video(filename):
+#     base = app.config.get('SAVE_DIR_BASE', './yolo_detections')
+#     video_root = os.path.join(base, 'video')
+#     filepath   = os.path.abspath(os.path.join(video_root, filename))
+
+#     # stop “../” traversal
+#     if not filepath.startswith(os.path.abspath(video_root)):
+#         return "Forbidden", 403
+
+#     if os.path.isfile(filepath):
+#         return send_file(filepath, as_attachment=False)
+#     else:
+#         return "Not found", 404
 
 # get aggregated detections rather than flood the webui
 @app.route('/api/detections')
