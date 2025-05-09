@@ -1283,12 +1283,13 @@ def index():
             >
                 View Images
             </button>
+            {% endif %}                                          
+                                  
             {% if detection.video_filename %}
             <button class="view-video-btn"
                     data-video-path="{{ detection.video_filename }}">
                 View Video
-            </button>
-            {% endif %}                                  
+            </button>                          
             {% endif %}
         </li>
         {% endfor %}

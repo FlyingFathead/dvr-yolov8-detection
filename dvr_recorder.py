@@ -1,19 +1,19 @@
 # dvr_recorder.py
 """
-Light‑weight DVR module for dvr‑yolov8‑detection.
+Light-weight DVR module for dvr-yolov8-detection.
 
 Records the raw RTMP stream (video **and** audio) into timestamped files
 whenever people are being detected, and automatically closes the file
 once no detections have happened for `dvr_record_duration` seconds.
 
 Designed to run in its **own** thread so it never blocks frame capture,
-image saving, remote sync, or the web‑server.
+image saving, remote sync, or the web-server.
 
 Requirements
 ------------
 * FFmpeg available in `$PATH` (or override with `[dvr] ffmpeg_path`).
 * Works with any input FFmpeg can open (RTMP/RTSP/…); the command uses
-  `-c copy` so **no re‑encoding** – cheap on CPU and it preserves the
+  `-c copy` so **no re-encoding** – cheap on CPU and it preserves the
   original audio if present.
 
 Usage
@@ -39,15 +39,13 @@ import time
 from datetime import datetime
 import signal
 import logging
-import shutil
-import queue
 from pathlib import Path
 
 __all__ = ["DVRRecorder"]
 
 # ---------------------------------------------------------------------------
 class DVRRecorder:
-    """High‑level wrapper around one FFmpeg process.
+    """High-level wrapper around one FFmpeg process.
 
     Parameters
     ----------
@@ -58,13 +56,13 @@ class DVRRecorder:
         detection pipeline consumes).
     detection_event : threading.Event
         Set while at least one detection is active, cleared after the
-        detector’s *cool‑down* considers the scene clear.
+        detector’s *cool-down* considers the scene clear.
     base_save_dir : str | Path
-        Points to the directory that already contains the still‑image
-        hierarchy (`yolo_detections/`). A sub‑directory `video/` will be
-        created next to it using the same date‑based layout.
+        Points to the directory that already contains the still-image
+        hierarchy (`yolo_detections/`). A sub-directory `video/` will be
+        created next to it using the same date-based layout.
     logger : logging.Logger
-        Use the project‑wide logger so everything lands in the same files.
+        Use the project-wide logger so everything lands in the same files.
     """
 
     def __init__(
@@ -102,6 +100,10 @@ class DVRRecorder:
         self._thread = threading.Thread(target=self._worker, name="DVRRecorder", daemon=True)
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
+
+        # State for the consumer (detector)
+        self._current_file: str | None = None   # path we are currently writing
+        self.current_file_finished: str | None = None  # last file that was closed
 
     # ------------------------------------------------------------------ API
     def start(self):
@@ -145,14 +147,14 @@ class DVRRecorder:
 
     def _current_filename(self):
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
-        return f"{ts}.mp4"  # container – copy‑codec so extension doesn’t matter much
+        return f"{ts}.mp4"  # container – copy-codec so extension doesn’t matter much
 
     # --------------------------------------------------------------- thread
     def _worker(self):
         """Main loop – waits for `detection_event`, starts/stops FFmpeg."""
         idle_since: float | None = None
         while not self._stop.is_set():
-            # Wait until a detection begins, but wake every 0.5 s to check stop flag
+            # Wait until a detection begins, but wake every 0.5 s to check stop flag
             if not self.detection_event.wait(0.5):
                 continue
 
@@ -176,7 +178,7 @@ class DVRRecorder:
                     # Enough silence – cut file
                     self._terminate_ffmpeg()
                     idle_since = None
-            # Small sleep to avoid busy‑looping
+            # Small sleep to avoid busy-looping
             time.sleep(0.25)
 
         # got stop flag – close ffmpeg before exiting
@@ -202,10 +204,11 @@ class DVRRecorder:
             "-movflags", "+faststart", # good for progressive download in browsers
             str(out_path)
         ]
-        # Start process in its own process‑group so we can SIGINT the whole thing
+        # Start process in its own process-group so we can SIGINT the whole thing
         self.log.info("[dvr] ⏺  Recording → %s", out_path)
         self._proc = subprocess.Popen(cmd, preexec_fn=os.setsid)
         self._current_file = str(out_path)
+        self.current_file_finished = None  # reset flag when new recording starts
 
     def _terminate_ffmpeg(self):
         with self._lock:
@@ -215,7 +218,7 @@ class DVRRecorder:
             try:
                 # Send SIGINT to the *group* so muxer flushes index cleanly
                 os.killpg(self._proc.pid, signal.SIGINT)
-                # Wait max 5 s
+                # Wait max 5 s
                 self._proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.log.warning("[dvr] ffmpeg didn’t exit – killing")
@@ -224,5 +227,8 @@ class DVRRecorder:
                 except Exception:
                     pass
             finally:
+                # Expose the finished file to the main detector exactly once
+                self.current_file_finished = self._current_file
+                self._current_file = None
                 self._proc = None
                 self.log.info("[dvr] file closed")
