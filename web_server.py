@@ -467,6 +467,7 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                     timestamp = datetime.strptime(detection['timestamp'], '%Y-%m-%d %H:%M:%S')
                     confidence = detection['confidence']
                     image_info = detection.get('image_filenames', {})
+                    video_filename = detection.get('video_filename')
 
                     # Extract image filenames if they exist
                     image_filename_entry = {}
@@ -486,6 +487,7 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                             'lowest_confidence': confidence,
                             'highest_confidence': confidence,
                             'image_filenames': [image_filename_entry] if image_filename_entry else [],
+                            'video_filename': video_filename,                            
                             'finalized': False
                         }
                         with aggregated_lock:
@@ -500,6 +502,8 @@ def aggregation_thread_function(detections_list, detections_lock, cooldown=30, b
                         current_aggregation['highest_confidence'] = max(current_aggregation['highest_confidence'], confidence)
                         if image_filename_entry:
                             current_aggregation['image_filenames'].append(image_filename_entry)
+                        if video_filename and not current_aggregation.get('video_filename'):
+                            current_aggregation['video_filename'] = video_filename
 
                     last_detection_time = time.time()
 
@@ -786,6 +790,21 @@ def hls_files(filename):
     so that /hls/playlist.m3u8 and /hls/segment_000.ts will be found.
     """
     return send_from_directory(HLS_OUTPUT_DIR, filename)
+
+@app.route('/api/videos/<path:filename>')
+def serve_video(filename):
+    base = app.config.get('SAVE_DIR_BASE', './yolo_detections')
+    video_root = os.path.join(base, 'video')
+    filepath   = os.path.abspath(os.path.join(video_root, filename))
+
+    # stop “../” traversal
+    if not filepath.startswith(os.path.abspath(video_root)):
+        return "Forbidden", 403
+
+    if os.path.isfile(filepath):
+        return send_file(filepath, as_attachment=False)
+    else:
+        return "Not found", 404
 
 # get aggregated detections rather than flood the webui
 @app.route('/api/detections')
@@ -1264,6 +1283,12 @@ def index():
             >
                 View Images
             </button>
+            {% if detection.video_filename %}
+            <button class="view-video-btn"
+                    data-video-path="{{ detection.video_filename }}">
+                View Video
+            </button>
+            {% endif %}                                  
             {% endif %}
         </li>
         {% endfor %}
@@ -1494,6 +1519,13 @@ def index():
 
         // --- Main click listener (delegated for 'View Images' buttons) ---
         document.addEventListener('click', function(e) {
+            // --- 'View Video' button click ---
+            if (e.target.matches('.view-video-btn')) {
+                const url = `${basePath.replace(/\/$/, '')}/api/videos/` +
+                            e.target.dataset.videoPath;
+                window.open(url, '_blank');
+                return;                       // nothing else to do for this click
+            }                                  
             // --- 'View Images' button click ---
             if (e.target.matches('.view-images-btn')) {
                 const button = e.target; // Keep reference to the button

@@ -55,6 +55,9 @@ import remote_sync
 # Import sending alerts on Telegram
 import telegram_alerts
 
+# import the dvr module
+from dvr_recorder import DVRRecorder
+
 hz_line()
 print(f"::: dvr-yolov8-detection v{version_number} | https://github.com/FlyingFathead/dvr-yolov8-detection/")
 hz_line()
@@ -814,6 +817,7 @@ def frame_processing_thread(
     detection_ongoing, headless
 ):
     global last_tts_time, tts_thread, tts_stop_event
+    global dvr              #  dvr module
 
     model = load_model(DEFAULT_MODEL_VARIANT)
     use_cuda_denoising = cuda_denoising_available()
@@ -987,6 +991,15 @@ def frame_processing_thread(
                         'named_zones': zone_names,   # e.g. ["FrontDoor"]
                         'is_critical': is_critical   # bool
                     }
+
+                    # ── NEW: attach the DVR clip that just closed, once ───────────
+                    if dvr.current_file_finished:
+                        detection_info['video_filename'] = os.path.relpath(
+                            dvr.current_file_finished,
+                            os.path.join(SAVE_DIR_BASE, 'video')
+                        )
+                        dvr.current_file_finished = None          # don’t repeat it
+                    # ──────────────────────────────────────────────────────────────
 
                     with detections_lock:
                         detections_list.appendleft(detection_info)
@@ -1450,6 +1463,12 @@ if __name__ == "__main__":
     stop_event = Event()
     detection_ongoing = Event()
 
+    # ── NEW : spin up the DVR -------------------------------------------
+    dvr = DVRRecorder(config, STREAM_URL, detection_ongoing,
+                      SAVE_DIR_BASE, main_logger)
+    dvr.start()                            # does nothing if [dvr] dvr_enabled=false
+    # ─────────────────────────────────────────────────────────────────────
+
     # Register signal handler for clean exit
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -1469,6 +1488,7 @@ if __name__ == "__main__":
         processing_thread.join()
 
     finally:
+        dvr.stop()            # flush last clip & kill ffmpeg        
         # Ensure TTS thread is stopped
         tts_stop_event.set()
         if tts_thread is not None:
