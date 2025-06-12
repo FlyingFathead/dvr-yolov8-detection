@@ -631,6 +631,41 @@ def finalize_aggregation(current_aggregation, cooldown, bold_threshold):
     if ENABLE_PERSISTENT_AGGREGATED_DETECTIONS:
         save_aggregated_detections()
 
+# get the candidates for save directories; use fallbacks when needed
+def get_save_dir_candidates(config):
+    """
+    Gets a list of candidate base directories for searching detection images,
+    in the same order of preference as the detection script.
+    """
+    candidates = []
+    
+    use_env = config.getboolean('detection', 'use_env_save_dir', fallback=False)
+    env_var = config.get('detection', 'env_save_dir_var', fallback='YOLO_SAVE_DIR')
+    
+    if use_env:
+        env_dir = os.getenv(env_var)
+        if env_dir:
+            candidates.append(env_dir)
+
+    # The order MUST match the logic in yolov8_live_rtmp_stream_detection.py
+    # 1. Primary directory
+    primary_dir = config.get('detection', 'default_save_dir', fallback=None)
+    if primary_dir:
+        candidates.append(primary_dir)
+
+    # 2. Fallback directory
+    fallback_dir = config.get('detection', 'fallback_save_dir', fallback=None)
+    if fallback_dir:
+        candidates.append(fallback_dir)
+
+    # 3. 'save_dir_base' as another fallback
+    save_dir_base = config.get('detection', 'save_dir_base', fallback=None)
+    if save_dir_base and save_dir_base not in candidates:
+        candidates.append(save_dir_base)
+    
+    logger.debug(f"Web server will search for images in these directories: {candidates}")
+    return candidates
+
 @app.before_request
 def log_request_info():
     client_ip = request.headers.get('X-Forwarded-For', request.remote_addr)
@@ -692,29 +727,42 @@ def log_request_info():
 @app.route('/api/', methods=['GET'])
 def api_root():
     return jsonify({"message": "API Root"}), 200
-
+      
 @app.route('/api/detections/<path:filename>')
 def serve_detection_image(filename):
-    save_dir_base = app.config.get('SAVE_DIR_BASE', './yolo_detections')
-    logger.info(f"SAVE_DIR_BASE: {save_dir_base}")
-    logger.info(f"Requested filename: {filename}")
-    # Use os.path.join and os.path.abspath
-    filepath = os.path.abspath(os.path.join(save_dir_base, filename))
-    logger.info(f"Computed filepath: {filepath}")
-
-    # Security check to prevent directory traversal
-    if not save_dir_base:
-        logger.error("save_dir_base is None. Cannot serve image.")
+    config = app.config.get('config')
+    if not config:
+        logger.error("Config not found in app context. Cannot determine save directories.")
         return "Internal Server Error", 500
-    if not filepath.startswith(os.path.abspath(save_dir_base)):
-        logger.error("Attempted directory traversal attack")
-        return "Forbidden", 403
-    if os.path.isfile(filepath):
-        return send_file(filepath)
-    else:
-        logger.error(f"File not found: {filepath}")
-        return "File not found", 404
 
+    search_dirs = get_save_dir_candidates(config)
+    logger.info(f"Searching for '{filename}' in candidate directories: {search_dirs}")
+
+    for base_dir in search_dirs:
+        try:
+            # Use os.path.abspath to resolve any relative paths like '.' or '..'
+            abs_base_dir = os.path.abspath(base_dir)
+            # Join the absolute base with the relative filename
+            filepath = os.path.join(abs_base_dir, filename)
+            
+            # Security check: After joining, the final absolute path must still be inside the base directory.
+            # This is a robust way to prevent directory traversal attacks (e.g., filename being '../.../etc/passwd')
+            if not os.path.abspath(filepath).startswith(abs_base_dir):
+                logger.warning(f"Path traversal attempt blocked: '{filename}' from base '{base_dir}'")
+                continue
+
+            if os.path.isfile(filepath):
+                logger.info(f"Found and serving file: {filepath}")
+                return send_file(filepath)
+            
+        except Exception as e:
+            logger.error(f"Error when checking path in '{base_dir}': {e}")
+            continue
+    
+    logger.error(f"File '{filename}' not found in any of the search directories.")
+    return "File not found", 404
+
+    
 @app.route('/api/toggle_preview', methods=['POST'])
 def toggle_preview():
     """Toggle between MJPEG and HLS preview on demand."""
@@ -1852,50 +1900,70 @@ def simulate_detection_and_logging():
 # detection_thread.start()
 # Removed simulation code for production use
 
+# new candidate selection
 def get_base_save_dir(config):
-    base_save_dir = None
+    # This function is now just a wrapper around the candidate logic,
+    # returning the first valid one for when the server is run standalone.
+    candidates = get_save_dir_candidates(config)
+    
+    for directory in candidates:
+        if not directory: continue
+        try:
+            if not os.path.exists(directory):
+                os.makedirs(directory, exist_ok=True)
+            if os.path.isdir(directory) and os.access(directory, os.W_OK):
+                logger.info(f"Web server standalone mode determined valid save dir: {directory}")
+                return directory
+        except Exception:
+            continue
+            
+    logger.error("No writable save directory available for web server (standalone).")
+    raise RuntimeError("No writable save directory available.")
 
-    # Read configurations
-    USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
-    ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var', fallback='YOLO_SAVE_DIR')
-    logger.info(f"USE_ENV_SAVE_DIR: {USE_ENV_SAVE_DIR}")
-    logger.info(f"ENV_SAVE_DIR_VAR: {ENV_SAVE_DIR_VAR}")
+# def get_base_save_dir(config):
+#     base_save_dir = None
 
-    # Check environment variable
-    if USE_ENV_SAVE_DIR:
-        env_dir = os.getenv(ENV_SAVE_DIR_VAR)
-        logger.info(f"Environment variable {ENV_SAVE_DIR_VAR} value: {env_dir}")
-        if env_dir and os.path.exists(env_dir) and os.access(env_dir, os.W_OK):
-            logger.info(f"Using environment-specified save directory: {env_dir}")
-            base_save_dir = env_dir
-        else:
-            logger.warning(f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}")
+#     # Read configurations
+#     USE_ENV_SAVE_DIR = config.getboolean('detection', 'use_env_save_dir', fallback=False)
+#     ENV_SAVE_DIR_VAR = config.get('detection', 'env_save_dir_var', fallback='YOLO_SAVE_DIR')
+#     logger.info(f"USE_ENV_SAVE_DIR: {USE_ENV_SAVE_DIR}")
+#     logger.info(f"ENV_SAVE_DIR_VAR: {ENV_SAVE_DIR_VAR}")
 
-    # Fallback to config value
-    if not base_save_dir:
-        SAVE_DIR_BASE = config.get('detection', 'save_dir_base', fallback='./yolo_detections')
-        logger.info(f"Attempting to use save_dir_base from config: {SAVE_DIR_BASE}")
-        if os.path.exists(SAVE_DIR_BASE) and os.access(SAVE_DIR_BASE, os.W_OK):
-            logger.info(f"Using save_dir_base from config: {SAVE_DIR_BASE}")
-            base_save_dir = SAVE_DIR_BASE
-        else:
-            logger.warning(f"save_dir_base {SAVE_DIR_BASE} does not exist or is not writable. Attempting to create it.")
-            try:
-                os.makedirs(SAVE_DIR_BASE, exist_ok=True)
-                if os.access(SAVE_DIR_BASE, os.W_OK):
-                    logger.info(f"Created and using save_dir_base: {SAVE_DIR_BASE}")
-                    base_save_dir = SAVE_DIR_BASE
-                else:
-                    logger.warning(f"save_dir_base {SAVE_DIR_BASE} is not writable after creation.")
-            except Exception as e:
-                logger.error(f"Failed to create save_dir_base: {SAVE_DIR_BASE}. Error: {e}")
+#     # Check environment variable
+#     if USE_ENV_SAVE_DIR:
+#         env_dir = os.getenv(ENV_SAVE_DIR_VAR)
+#         logger.info(f"Environment variable {ENV_SAVE_DIR_VAR} value: {env_dir}")
+#         if env_dir and os.path.exists(env_dir) and os.access(env_dir, os.W_OK):
+#             logger.info(f"Using environment-specified save directory: {env_dir}")
+#             base_save_dir = env_dir
+#         else:
+#             logger.warning(f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}")
 
-    if not base_save_dir:
-        logger.error("No writable save directory available. Exiting.")
-        raise RuntimeError("No writable save directory available.")
+#     # Fallback to config value
+#     if not base_save_dir:
+#         SAVE_DIR_BASE = config.get('detection', 'save_dir_base', fallback='./yolo_detections')
+#         logger.info(f"Attempting to use save_dir_base from config: {SAVE_DIR_BASE}")
+#         if os.path.exists(SAVE_DIR_BASE) and os.access(SAVE_DIR_BASE, os.W_OK):
+#             logger.info(f"Using save_dir_base from config: {SAVE_DIR_BASE}")
+#             base_save_dir = SAVE_DIR_BASE
+#         else:
+#             logger.warning(f"save_dir_base {SAVE_DIR_BASE} does not exist or is not writable. Attempting to create it.")
+#             try:
+#                 os.makedirs(SAVE_DIR_BASE, exist_ok=True)
+#                 if os.access(SAVE_DIR_BASE, os.W_OK):
+#                     logger.info(f"Created and using save_dir_base: {SAVE_DIR_BASE}")
+#                     base_save_dir = SAVE_DIR_BASE
+#                 else:
+#                     logger.warning(f"save_dir_base {SAVE_DIR_BASE} is not writable after creation.")
+#             except Exception as e:
+#                 logger.error(f"Failed to create save_dir_base: {SAVE_DIR_BASE}. Error: {e}")
 
-    logger.info(f"Final base_save_dir: {base_save_dir}")
-    return base_save_dir
+#     if not base_save_dir:
+#         logger.error("No writable save directory available. Exiting.")
+#         raise RuntimeError("No writable save directory available.")
+
+#     logger.info(f"Final base_save_dir: {base_save_dir}")
+#     return base_save_dir
 
 if __name__ == '__main__':
     # Load configurations

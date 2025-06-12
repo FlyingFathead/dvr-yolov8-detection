@@ -284,6 +284,9 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **0.1623** (Jun 12 2025)
+  - Fixed fallback logic for directory saving; now all file saves are verified; two-level fallback for each file save
+  - Web server tries to fetch the file from both the intended and the fallback location when needed
 - **0.1622**
   - **Feature: Implemented Lazy Loading for Web UI Detection Images.**
     - Aggregated detection entries are now assigned unique UUIDs during processing and persistence.

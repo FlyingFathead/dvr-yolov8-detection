@@ -567,93 +567,68 @@ def log_cuda_info():
 
 # Function to get the base save directory (without date subdirs)
 def get_base_save_dir():
-    base_save_dir = None
+    """
+    Determines the single, valid base directory to be used for this session.
+    It tries a list of potential directories in order of preference and uses the first
+    one that is found to be writable. It will also attempt to create directories
+    if they don't exist. This ensures that even if a primary directory (like a network mount)
+    is unavailable, the application can fall back to a local directory.
+    """
 
-    # 1. Use environment-specified directory
+    # Build a list of candidate directories in order of preference.
+    candidates = []
+
+    # 1. Environment variable (highest priority)
     if USE_ENV_SAVE_DIR:
         env_dir = os.getenv(ENV_SAVE_DIR_VAR)
-        if env_dir and os.path.exists(env_dir) and os.access(env_dir, os.W_OK):
-            main_logger.info(f"Using environment-specified save directory: {env_dir}")
-            base_save_dir = env_dir  # Set base_save_dir here
+        if env_dir:
+            candidates.append(env_dir)
         else:
-            main_logger.warning(
-                f"Environment variable {ENV_SAVE_DIR_VAR} is set but the directory does not exist or is not writable. Checked path: {env_dir}"
-            )
+            main_logger.info(f"USE_ENV_SAVE_DIR is true, but env var '{ENV_SAVE_DIR_VAR}' is not set.")
 
-    # 2. Use save_dir_base from config or default
-    if not base_save_dir:
-        SAVE_DIR_BASE = config.get('detection', 'save_dir_base', fallback='./yolo_detections')
-        if os.path.exists(SAVE_DIR_BASE) and os.access(SAVE_DIR_BASE, os.W_OK):
-            main_logger.info(f"Using save_dir_base from config: {SAVE_DIR_BASE}")
-            base_save_dir = SAVE_DIR_BASE
-        else:
-            main_logger.warning(f"save_dir_base {SAVE_DIR_BASE} does not exist or is not writable. Attempting to create it.")
-            try:
-                os.makedirs(SAVE_DIR_BASE, exist_ok=True)
-                if os.access(SAVE_DIR_BASE, os.W_OK):
-                    main_logger.info(f"Created and using save_dir_base: {SAVE_DIR_BASE}")
-                    base_save_dir = SAVE_DIR_BASE
-                else:
-                    main_logger.warning(f"save_dir_base {SAVE_DIR_BASE} is not writable after creation.")
-            except Exception as e:
-                main_logger.error(f"Failed to create save_dir_base: {SAVE_DIR_BASE}. Error: {e}")
+    # 2. Primary directory from config (e.g., /mnt/yolo_detections/)
+    # This is treated as the main, preferred save location.
+    primary_dir = config.get('detection', 'default_save_dir', fallback=None)
+    if primary_dir:
+        candidates.append(primary_dir)
 
-    # 3. Fallback to fallback_save_dir
-    if not base_save_dir and FALLBACK_SAVE_DIR:
-        if os.path.exists(FALLBACK_SAVE_DIR) and os.access(FALLBACK_SAVE_DIR, os.W_OK):
-            main_logger.info(f"Using fallback save directory: {FALLBACK_SAVE_DIR}")
-            base_save_dir = FALLBACK_SAVE_DIR
-        else:
-            main_logger.warning(f"Fallback save directory {FALLBACK_SAVE_DIR} does not exist or is not writable. Attempting to create it.")
-            try:
-                os.makedirs(FALLBACK_SAVE_DIR, exist_ok=True)
-                if os.access(FALLBACK_SAVE_DIR, os.W_OK):
-                    main_logger.info(f"Created and using fallback save directory: {FALLBACK_SAVE_DIR}")
-                    base_save_dir = FALLBACK_SAVE_DIR
-                else:
-                    main_logger.warning(f"Fallback save directory {FALLBACK_SAVE_DIR} is not writable after creation.")
-            except Exception as e:
-                main_logger.error(f"Failed to create fallback save directory: {FALLBACK_SAVE_DIR}. Error: {e}")
+    # 3. Fallback directory from config (e.g., ./yolo_detections/)
+    # This is used if the primary directory fails.
+    fallback_dir = config.get('detection', 'fallback_save_dir', fallback=None)
+    if fallback_dir:
+        candidates.append(fallback_dir)
 
-    # 4. Use default_save_dir
-    if not base_save_dir and DEFAULT_SAVE_DIR:
-        if os.path.exists(DEFAULT_SAVE_DIR) and os.access(DEFAULT_SAVE_DIR, os.W_OK):
-            main_logger.info(f"Using default save directory: {DEFAULT_SAVE_DIR}")
-            base_save_dir = DEFAULT_SAVE_DIR
-        else:
-            main_logger.warning(f"Default save directory {DEFAULT_SAVE_DIR} does not exist or is not writable. Attempting to create it.")
-            try:
-                os.makedirs(DEFAULT_SAVE_DIR, exist_ok=True)
-                if os.access(DEFAULT_SAVE_DIR, os.W_OK):
-                    main_logger.info(f"Created and using default save directory: {DEFAULT_SAVE_DIR}")
-                    base_save_dir = DEFAULT_SAVE_DIR
-                else:
-                    main_logger.warning(f"Default save directory {DEFAULT_SAVE_DIR} is not writable after creation.")
-            except Exception as e:
-                main_logger.error(f"Failed to create default save directory: {DEFAULT_SAVE_DIR}. Error: {e}")
+    # 4. For backward compatibility and as another fallback, check 'save_dir_base'
+    save_dir_base = config.get('detection', 'save_dir_base', fallback=None)
+    if save_dir_base and save_dir_base not in candidates:
+        candidates.append(save_dir_base)
 
-    # 5. Final fallback to a hardcoded directory (optional)
-    if not base_save_dir:
-        final_fallback_dir = os.path.join(os.path.dirname(__file__), 'final_fallback_detections')
-        if os.path.exists(final_fallback_dir) and os.access(final_fallback_dir, os.W_OK):
-            main_logger.info(f"Using final hardcoded fallback save directory: {final_fallback_dir}")
-            base_save_dir = final_fallback_dir
-        else:
-            try:
-                os.makedirs(final_fallback_dir, exist_ok=True)
-                if os.access(final_fallback_dir, os.W_OK):
-                    main_logger.info(f"Created and using final hardcoded fallback save directory: {final_fallback_dir}")
-                    base_save_dir = final_fallback_dir
-                else:
-                    main_logger.warning(f"Final fallback save directory {final_fallback_dir} is not writable after creation.")
-            except Exception as e:
-                main_logger.error(f"Failed to create final hardcoded fallback save directory: {final_fallback_dir}. Error: {e}")
+    main_logger.info(f"Searching for a valid save directory. Candidate order: {candidates}")
+
+    for directory in candidates:
+        if not directory:  # Skip empty strings
+            continue
+
+        main_logger.info(f"Checking candidate directory: '{directory}'")
+        try:
+            # If the directory doesn't exist, try to create it.
+            if not os.path.exists(directory):
+                main_logger.warning(f"Directory '{directory}' does not exist. Attempting to create it.")
+                os.makedirs(directory, exist_ok=True)
+
+            # Now, check if it's a writable directory.
+            if os.path.isdir(directory) and os.access(directory, os.W_OK):
+                main_logger.info(f"Success! Using '{directory}' as the base save directory for this session.")
+                return directory
+            else:
+                main_logger.warning(f"Candidate '{directory}' is not a writable directory. Trying next option.")
+
+        except Exception as e:
+            main_logger.error(f"Failed to access or create directory '{directory}': {e}. Trying next option.")
 
     # Raise error if no writable directory is found
-    if not base_save_dir:
-        raise RuntimeError("No writable save directory available.")
-
-    return base_save_dir
+    main_logger.error("FATAL: No valid save directory could be found or created from config. Please check config.ini and permissions.")
+    raise RuntimeError("No writable save directory available.")
 
 # Initialize SAVE_DIR and CURRENT_DATE
 # Initialize SAVE_DIR_BASE using the updated get_base_save_dir function
@@ -663,40 +638,81 @@ CURRENT_DATE = datetime.now().date()
 
 # Function to get the current save directory with date-based subdirectories
 def get_current_save_dir():
+    """
+    Determines and returns a writable directory path for saving detections,
+    including date-based subdirectories if enabled.
+
+    THIS IS THE CORE FALLBACK LOGIC. It is called every time a detection
+    needs to be saved. It will try the primary save directory first. If any
+    OS error occurs (like the "Input/output error" from a failed mount),
+    it will catch it and immediately try the next fallback directory from the config.
+    """
     global CURRENT_DATE, SAVE_DIR_BASE
 
+    # 1. Build the list of candidate BASE directories every single time. This ensures
+    #    we always know the primary and fallback options.
+    candidates = []
+    if USE_ENV_SAVE_DIR:
+        env_dir = os.getenv(ENV_SAVE_DIR_VAR)
+        if env_dir:
+            candidates.append(env_dir)
+    
+    # Add primary and fallback from config.ini
+    # This is the crucial order: default_save_dir first, then fallback_save_dir.
+    primary_dir = config.get('detection', 'default_save_dir', fallback=None)
+    if primary_dir:
+        candidates.append(primary_dir)
+    fallback_dir = config.get('detection', 'fallback_save_dir', fallback=None)
+    if fallback_dir:
+        candidates.append(fallback_dir)
+
+    # For good measure, add the old 'save_dir_base' as a final option.
+    legacy_fallback = config.get('detection', 'save_dir_base', fallback=None)
+    if legacy_fallback and legacy_fallback not in candidates:
+        candidates.append(legacy_fallback)
+
+    # 2. Get the current date for subdirectory path
     if CREATE_DATE_SUBDIRS:
-        new_date = datetime.now().date()
-        if new_date != CURRENT_DATE:
-            CURRENT_DATE = new_date
-            # Update SAVE_DIR with new date-based subdirectories
-            year = CURRENT_DATE.strftime("%Y")
-            month = CURRENT_DATE.strftime("%m")
-            day = CURRENT_DATE.strftime("%d")
-            date_subdir = os.path.join(SAVE_DIR_BASE, year, month, day)
-            try:
-                os.makedirs(date_subdir, exist_ok=True)
-                main_logger.info(f"Date changed. Created/navigated to new date-based subdirectory: {date_subdir}")
-                return date_subdir
-            except Exception as e:
-                main_logger.error(f"Failed to create new date-based subdirectory {date_subdir}: {e}")
-                # Fallback to base_save_dir if subdirectory creation fails
-                return SAVE_DIR_BASE
-        else:
-            # Ensure the date-based subdirectory exists
-            year = CURRENT_DATE.strftime("%Y")
-            month = CURRENT_DATE.strftime("%m")
-            day = CURRENT_DATE.strftime("%d")
-            date_subdir = os.path.join(SAVE_DIR_BASE, year, month, day)
-            if not os.path.exists(date_subdir):
-                try:
-                    os.makedirs(date_subdir, exist_ok=True)
-                    main_logger.info(f"Created date-based subdirectory: {date_subdir}")
-                except Exception as e:
-                    main_logger.error(f"Failed to create date-based subdirectory {date_subdir}: {e}")
-            return date_subdir
+        CURRENT_DATE = datetime.now().date()
+        date_path_segment = os.path.join(
+            CURRENT_DATE.strftime("%Y"),
+            CURRENT_DATE.strftime("%m"),
+            CURRENT_DATE.strftime("%d")
+        )
     else:
-        return SAVE_DIR_BASE
+        date_path_segment = ""
+
+    # 3. Loop through the candidates and find the first one that works RIGHT NOW.
+    for base_path in candidates:
+        if not base_path:
+            continue
+
+        # Construct the full path we want to write to
+        full_path_to_check = os.path.join(base_path, date_path_segment)
+
+        try:
+            # The ACID TEST: Try to create the directory. This will fail hard
+            # with an I/O error if the mount is dead.
+            os.makedirs(full_path_to_check, exist_ok=True)
+
+            # If we succeed, we have found a working directory.
+            # Update the global SAVE_DIR_BASE so other parts of the script
+            # (like remote_sync) know what the currently active, working directory is.
+            if base_path != SAVE_DIR_BASE:
+                 main_logger.warning(f"Save directory failed. Switched to a working path: '{base_path}'")
+                 SAVE_DIR_BASE = base_path
+            
+            # Return the full, working path.
+            return full_path_to_check
+
+        except OSError as e:
+            # If we get an I/O error or any other OS issue, log it and try the next candidate.
+            main_logger.error(f"CRITICAL: Failed to access or create '{full_path_to_check}'. Error: {e}. Trying next fallback.")
+            continue
+
+    # 4. If the loop finishes, it means ALL candidates failed. Abort.
+    main_logger.critical("FATAL: All configured save directories have failed. Cannot save detections.")
+    raise RuntimeError("All configured save directories are unwritable. Check logs and system for errors.")
 
 # Initialize the initial SAVE_DIR
 SAVE_DIR = get_current_save_dir()
@@ -1086,7 +1102,7 @@ def image_saving_thread_function(image_save_queue, stop_event):
 
         try:
             frame, filename, image_type = image_save_queue.get(timeout=1)
-            main_logger.info(f"Received image to save: {image_type}, filename: {filename}")
+            main_logger.info(f"Dequeued image to save: {image_type}, filename: {filename}")
 
             filepath = None
             if image_type == 'full_frame':
@@ -1102,17 +1118,38 @@ def image_saving_thread_function(image_save_queue, stop_event):
             else:
                 main_logger.warning(f"Unknown image type: {image_type}")
 
+            # --- START OF THE FIX ---
+            # If the file was saved successfully, VERIFY it exists before syncing.
             if filepath:
-                # Enqueue file for remote sync if enabled
-                if remote_sync_obj.REMOTE_SYNC_ENABLED:
-                    try:
-                        remote_sync_obj.enqueue_file(filepath)
-                    except Full:
-                        main_logger.warning(f"Remote sync queue is full. Dropping file: {filepath}")
+                # Verification loop to deal with network filesystem latency (NFS/SMB).
+                # Try to confirm file existence for up to 2 seconds.
+                verified = False
+                for i in range(10):  # 10 attempts, 0.2s each
+                    if os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+                        main_logger.info(f"File verified on disk: {filepath}")
+                        verified = True
+                        break
+                    else:
+                        main_logger.warning(f"File not yet visible on disk, waiting... (Attempt {i+1}/10): {filepath}")
+                        time.sleep(0.2)
+                
+                if verified:
+                    # Enqueue file for remote sync if enabled
+                    if remote_sync_obj.REMOTE_SYNC_ENABLED:
+                        try:
+                            main_logger.info(f"Queuing verified file for remote sync: {filepath}")
+                            remote_sync_obj.enqueue_file(filepath)
+                        except Full:
+                            main_logger.warning(f"Remote sync queue is full. Dropping file: {filepath}")
+                else:
+                    # If the file never appeared, log a critical error.
+                    main_logger.error(f"CRITICAL: File was reported as saved but never appeared on disk after waiting. Skipping sync for: {filepath}")
+            # --- END OF THE FIX ---
+
         except Empty:
             continue
         except Exception as e:
-            main_logger.error(f"Error in image_saving_thread: {e}")
+            main_logger.error(f"Error in image_saving_thread: {e}", exc_info=True)
     main_logger.info("Image saving thread stopped")
 
 # Start the image-saving thread
