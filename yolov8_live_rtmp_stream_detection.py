@@ -903,7 +903,7 @@ def frame_processing_thread(
                 #     We'll only do so if at least one detection is kept.
                 
                 # 5) Per-detection
-                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 SAVE_DIR = get_current_save_dir()  # update date-based subdir
 
                 for det_idx, det in enumerate(detections):
@@ -978,21 +978,32 @@ def frame_processing_thread(
 
                     # 5D) Build detection_info
                     image_filenames = {}
-                    if full_frame_filename:
-                        image_filenames['full_frame'] = os.path.relpath(
-                            os.path.join(SAVE_DIR, full_frame_filename),
-                            SAVE_DIR_BASE
-                        )
-                    if detection_area_filename:
-                        image_filenames['detection_area'] = os.path.relpath(
-                            os.path.join(SAVE_DIR, detection_area_filename),
-                            SAVE_DIR_BASE
-                        )
+                    
+                    # --- START OF THE FIX ---
+                    # Build the relative path MANUALLY instead of using os.path.relpath
+                    # to avoid creating '..' paths when the save directory falls back.
+                    # The web server expects a clean "YYYY/MM/DD/filename.ext" format.
+                    if CREATE_DATE_SUBDIRS:
+                        now = datetime.now()
+                        date_prefix = now.strftime("%Y/%m/%d") # Use forward slashes for URL
+                        
+                        if full_frame_filename:
+                            # os.path.join will use the correct separator, then we normalize to '/'
+                            image_filenames['full_frame'] = os.path.join(date_prefix, full_frame_filename).replace('\\', '/')
+                        if detection_area_filename:
+                            image_filenames['detection_area'] = os.path.join(date_prefix, detection_area_filename).replace('\\', '/')
+                    else:
+                        # If not using date subdirs, the path is just the filename.
+                        if full_frame_filename:
+                            image_filenames['full_frame'] = full_frame_filename
+                        if detection_area_filename:
+                            image_filenames['detection_area'] = detection_area_filename
+                    # --- END OF THE FIX ---
 
                     detection_info = {
                         'detection_count': detection_count,
                         'frame_count': int(total_frames),
-                        'timestamp': timestamp,
+                        'timestamp': timestamp_str,
                         'coordinates': (
                             int(x1), int(y1),
                             int(x2), int(y2)
@@ -1036,7 +1047,7 @@ def frame_processing_thread(
 
                 # 6) If we had at least one valid detection, log details
                 if any_kept_detection:
-                    log_detection_details(detections, total_frames, timestamp)
+                    log_detection_details(detections, total_frames, timestamp_str)
                     # Start TTS in a separate thread if not running
                     if tts_thread is None or not tts_thread.is_alive():
                         tts_stop_event.clear()
