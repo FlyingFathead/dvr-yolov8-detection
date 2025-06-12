@@ -903,7 +903,9 @@ def frame_processing_thread(
                 #     We'll only do so if at least one detection is kept.
                 
                 # 5) Per-detection
-                timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                # timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')      
+                timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                timestamp_str = timestamp                                    
                 SAVE_DIR = get_current_save_dir()  # update date-based subdir
 
                 for det_idx, det in enumerate(detections):
