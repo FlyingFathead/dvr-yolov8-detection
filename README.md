@@ -284,6 +284,9 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **0.1625** 
+  - Added a separate `watchdog.py` utility for stream freeze situations
+  - Configurable via `config.ini`, Telegram alerts available
 - **0.1624**
   - Additional relative path fallback fix in aggregation
   - Paths for webUI are now correctly constructed

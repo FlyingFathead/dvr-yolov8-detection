@@ -111,7 +111,7 @@ def send_summary_alert(detections):
     bold_count = f"<strong>{count}</strong>" if count >= DETECTION_COUNT_WARNING_THRESHOLD else f"{count}"
 
     summary = (
-        f"👀 <b>Detection Summary</b> {warning}\n"
+        f"ℹ️ <b>Detection Summary</b> {warning}\n"
         f"<b>First Seen:</b> {first_seen}\n"
         f"<b>Last Seen:</b> {last_seen}\n"
         f"<b>Number of Detections:</b> {bold_count}\n"

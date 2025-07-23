@@ -158,14 +158,6 @@ AGGREGATED_DETECTIONS_FILE = config.get('aggregation', 'aggregated_detections_fi
 # max number of aggregation entries to show on webUI
 webui_max_aggregation_entries = 100
 
-# Watchdog configuration
-ENABLE_FREEZE_DETECTOR = config.getboolean('watchdog', 'enable_freeze_detector', fallback=False)
-if ENABLE_FREEZE_DETECTOR:
-    FREEZE_DURATION = config.getint('watchdog', 'freeze_duration', fallback=10)
-    FREEZE_SENSITIVITY_THRESHOLD = config.getint('watchdog', 'freeze_sensitivity_threshold', fallback=50000)
-    SEND_TELEGRAM_ALERT_ON_FREEZE = config.getboolean('watchdog', 'send_telegram_alert_on_freeze', fallback=True)
-    main_logger.info(f"Video freeze detector is enabled (Duration: {FREEZE_DURATION}s, Sensitivity: {FREEZE_SENSITIVITY_THRESHOLD})")
-
 # Initialize the image save queue and stop event
 # image_save_queue = Queue()
 image_save_queue = Queue(maxsize=IMAGE_SAVE_QUEUE_MAXSIZE)

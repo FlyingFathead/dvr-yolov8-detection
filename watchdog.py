@@ -1,15 +1,12 @@
 # watchdog.py
 #
-# v2: A completely standalone script to monitor an RTMP stream for freezes.
-#     - Fixes the asyncio/Telegram bug.
-#     - Adds a --debug mode to visually tune sensitivity.
-# 
+# v5 (Final): Standalone script with REPEATED alerts for both
+#     FROZEN and OFFLINE streams, with CONSTANT console feedback restored.
+#
 # See `config.ini` for `[watchdog]` section to configure.
 #
 # To run normally:  python3 watchdog.py
-# To debug/tune:     python3 watchdog.py --debug
 #
-
 import cv2
 import numpy as np
 import time
@@ -21,8 +18,6 @@ import threading
 import asyncio
 import argparse
 
-# It requires the python-telegram-bot library.
-# Install it with: pip install python-telegram-bot==13.15
 try:
     import telegram
 except ImportError:
@@ -37,126 +32,144 @@ logging.basicConfig(
     stream=sys.stdout,
 )
 
-# --- CORRECTED, Self-Contained Telegram Function ---
-def send_telegram_alert_sync():
-    """
-    Synchronous wrapper that correctly runs the async send_telegram_alert function.
-    This fixes the 'coroutine was never awaited' bug.
-    """
+# --- Self-Contained Telegram Functions ---
+def _send_telegram_alert(message):
+    """Generic alert sender to avoid code duplication."""
+    async def send_async():
+        bot_token = os.getenv('DVR_YOLOV8_TELEGRAM_BOT_TOKEN')
+        user_ids_str = os.getenv('DVR_YOLOV8_ALLOWED_TELEGRAM_USERS')
+        if not bot_token or not user_ids_str:
+            logging.error("Cannot send Telegram alert. Environment variables for the bot are not set.")
+            return
+        bot = telegram.Bot(token=bot_token)
+        user_ids = [int(uid.strip()) for uid in user_ids_str.split(',')]
+        for user_id in user_ids:
+            try:
+                await bot.send_message(chat_id=user_id, text=message, parse_mode="HTML")
+            except Exception as e:
+                logging.error(f"Failed to send message to user {user_id}: {e}")
     try:
-        asyncio.run(send_telegram_alert_async())
-        logging.info("Successfully sent stream freeze alert to all allowed users.")
+        asyncio.run(send_async())
+        logging.info("Successfully sent alert to all allowed users.")
     except Exception as e:
         logging.error(f"An error occurred in the Telegram alert thread: {e}")
 
-async def send_telegram_alert_async():
-    """
-    Initializes its own Telegram bot instance and sends a freeze alert asynchronously.
-    """
-    bot_token = os.getenv('DVR_YOLOV8_TELEGRAM_BOT_TOKEN')
-    user_ids_str = os.getenv('DVR_YOLOV8_ALLOWED_TELEGRAM_USERS')
-
-    if not bot_token or not user_ids_str:
-        logging.error("Cannot send Telegram alert. Environment variables for the bot are not set.")
-        return
-
-    bot = telegram.Bot(token=bot_token)
-    user_ids = [int(uid.strip()) for uid in user_ids_str.split(',')]
-    
-    freeze_message = (
+def send_freeze_alert_sync():
+    """Sends the 'Stream Frozen' message."""
+    _send_telegram_alert(
         "🚨❄️ <b>STREAM FROZEN</b> ❄️🚨\n\n"
-        "The watchdog has detected that the video stream has been frozen for a significant duration.\n"
+        "The watchdog is connected, but the video stream has been static for a significant duration.\n"
         "Please check the source (e.g., OBS)."
     )
 
-    for user_id in user_ids:
-        try:
-            await bot.send_message(chat_id=user_id, text=freeze_message, parse_mode="HTML")
-        except Exception as e:
-            logging.error(f"Failed to send message to user {user_id}: {e}")
+def send_disconnect_alert_sync():
+    """Sends the 'Stream Offline' message."""
+    _send_telegram_alert(
+        "🚨‼️ <b>STREAM OFFLINE</b> ‼️🚨\n\n"
+        "The watchdog cannot connect to the stream source.\n"
+        "Please check your streaming software or network connection."
+    )
 
 # --- Main Application ---
 try:
     config = configparser.ConfigParser(interpolation=None)
     config.read('config.ini')
-
     STREAM_URL = config.get('stream', 'stream_url', fallback='rtmp://127.0.0.1:1935/live/stream')
-    ENABLE_FREEZE_DETECTOR = config.getboolean('watchdog', 'enable_freeze_detector', fallback=False)
+    # Freeze Detection
+    ENABLE_FREEZE_DETECTOR = config.getboolean('watchdog', 'enable_freeze_detector', fallback=True)
     FREEZE_DURATION = config.getint('watchdog', 'freeze_duration', fallback=10)
     FREEZE_SENSITIVITY_THRESHOLD = config.getint('watchdog', 'freeze_sensitivity_threshold', fallback=500)
     SEND_TELEGRAM_ALERT_ON_FREEZE = config.getboolean('watchdog', 'send_telegram_alert_on_freeze', fallback=True)
     POLL_INTERVAL = config.getint('watchdog', 'poll_interval_seconds', fallback=1)
+    ENABLE_REPEATED_ALERTS = config.getboolean('watchdog', 'enable_repeated_alerts', fallback=True)
+    REPEAT_ALERT_INTERVAL = config.getint('watchdog', 'repeat_alert_interval_minutes', fallback=5)
+    REPEAT_ALERT_SECONDS = REPEAT_ALERT_INTERVAL * 60
+    # Disconnect Detection
+    ENABLE_DISCONNECT_ALERTS = config.getboolean('watchdog', 'enable_disconnect_alerts', fallback=True)
+    DISCONNECT_THRESHOLD = config.getint('watchdog', 'disconnect_alert_threshold_minutes', fallback=5)
+    DISCONNECT_THRESHOLD_SECONDS = DISCONNECT_THRESHOLD * 60
+    REPEAT_DISCONNECT_INTERVAL = config.getint('watchdog', 'repeat_disconnect_alert_interval_minutes', fallback=15)
+    REPEAT_DISCONNECT_SECONDS = REPEAT_DISCONNECT_INTERVAL * 60
 except Exception as e:
     logging.error(f"FATAL: Could not read config.ini. Error: {e}")
     sys.exit(1)
 
-def run_watchdog(debug_mode=False):
-    if not ENABLE_FREEZE_DETECTOR:
-        logging.info("Freeze detector is disabled in config.ini. Exiting.")
-        return
-
-    logging.info("Starting standalone stream freeze watchdog...")
-    if debug_mode:
-        debug_path = "watchdog_debug"
-        os.makedirs(debug_path, exist_ok=True)
-        logging.warning(f"DEBUG MODE IS ON. Images will be saved to the '{debug_path}' folder.")
-
-    last_frame_signature = None
-    freeze_start_time = None
-    alert_sent_for_current_freeze = False
-    cap = None
+def run_watchdog():
+    logging.info("Starting standalone stream watchdog...")
+    if ENABLE_FREEZE_DETECTOR: logging.info(f"Freeze detection is ENABLED.")
+    if ENABLE_DISCONNECT_ALERTS: logging.info(f"Disconnect detection is ENABLED.")
+    
+    cap, stream_is_confirmed_up = None, False
+    last_frame_signature, freeze_start_time, last_freeze_alert_time = None, None, None
+    connection_fail_start_time, last_disconnect_alert_time = None, None
 
     while True:
         try:
+            # --- Stream Connection Logic ---
             if cap is None or not cap.isOpened():
+                if stream_is_confirmed_up and ENABLE_DISCONNECT_ALERTS:
+                    if connection_fail_start_time is None:
+                        logging.warning("Lost connection to active stream. Starting disconnect timer...")
+                        connection_fail_start_time = time.time()
+                    if (time.time() - connection_fail_start_time) > DISCONNECT_THRESHOLD_SECONDS:
+                        time_to_alert = last_disconnect_alert_time is None or \
+                                       (time.time() - last_disconnect_alert_time) > REPEAT_DISCONNECT_SECONDS
+                        if time_to_alert:
+                            logging.critical("STREAM OFFLINE! Sending disconnect alert.")
+                            if SEND_TELEGRAM_ALERT_ON_FREEZE:
+                                threading.Thread(target=send_disconnect_alert_sync).start()
+                            last_disconnect_alert_time = time.time()
                 logging.info("Attempting to connect to video stream...")
                 cap = cv2.VideoCapture(STREAM_URL)
                 if not cap.isOpened():
-                    logging.warning("Failed to connect. Retrying in 10 seconds...")
                     time.sleep(10)
                     continue
-                logging.info("Successfully connected.")
+            
+            # --- Connection is now considered successful ---
+            if not stream_is_confirmed_up:
+                logging.info("Stream connection is active.")
+                stream_is_confirmed_up = True
+            if connection_fail_start_time is not None:
+                logging.info("Stream connection has been RESTORED.")
+                connection_fail_start_time, last_disconnect_alert_time = None, None
 
+            # --- Frame Reading & Freeze Detection ---
             ret, frame = cap.read()
             if not ret:
-                logging.warning("Failed to grab a frame. Reconnecting...")
-                cap.release()
-                cap = None
+                logging.warning("Connected but failed to grab frame. Re-establishing...")
+                cap.release(); cap = None
                 time.sleep(5)
                 continue
 
-            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            current_signature = cv2.resize(gray_frame, (128, 72), interpolation=cv2.INTER_AREA)
-
-            if last_frame_signature is not None:
-                diff_image = cv2.absdiff(last_frame_signature, current_signature)
-                diff_sum = int(np.sum(diff_image))
-
-                # Update log message to be more informative
-                log_message = f"Frame difference: {diff_sum} (Threshold: {FREEZE_SENSITIVITY_THRESHOLD})"
-                logging.info(log_message)
-
-                if debug_mode:
-                    cv2.imwrite(os.path.join(debug_path, "current.png"), current_signature)
-                    cv2.imwrite(os.path.join(debug_path, "last.png"), last_frame_signature)
-                    cv2.imwrite(os.path.join(debug_path, "diff.png"), diff_image)
-
-                if diff_sum < FREEZE_SENSITIVITY_THRESHOLD:
-                    if freeze_start_time is None:
-                        freeze_start_time = time.time()
+            if ENABLE_FREEZE_DETECTOR:
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                current_signature = cv2.resize(gray, (128, 72), interpolation=cv2.INTER_AREA)
+                if last_frame_signature is not None:
+                    diff_sum = int(np.sum(cv2.absdiff(last_frame_signature, current_signature)))
                     
-                    if (time.time() - freeze_start_time) > FREEZE_DURATION and not alert_sent_for_current_freeze:
-                        logging.critical(f"STREAM FROZEN! No significant change for {FREEZE_DURATION} seconds.")
-                        if SEND_TELEGRAM_ALERT_ON_FREEZE:
-                            threading.Thread(target=send_telegram_alert_sync).start()
-                        alert_sent_for_current_freeze = True
-                else:
+                    # --- THIS IS THE RESTORED LOGGING, IT WILL RUN EVERY TIME ---
+                    log_message = f"Frame difference: {diff_sum} (Threshold: {FREEZE_SENSITIVITY_THRESHOLD})"
                     if freeze_start_time is not None:
-                        logging.info("Stream is active again.")
-                    freeze_start_time = None
-                    alert_sent_for_current_freeze = False
+                        frozen_for = int(time.time() - freeze_start_time)
+                        log_message += f" | Frozen for: {frozen_for}s"
+                    logging.info(log_message)
+                    # --- END RESTORED LOGGING ---
+
+                    if diff_sum < FREEZE_SENSITIVITY_THRESHOLD:
+                        if freeze_start_time is None: freeze_start_time = time.time()
+                        if (time.time() - freeze_start_time) > FREEZE_DURATION:
+                            time_to_alert = last_freeze_alert_time is None or \
+                                           (ENABLE_REPEATED_ALERTS and (time.time() - last_freeze_alert_time) > REPEAT_ALERT_SECONDS)
+                            if time_to_alert:
+                                logging.critical(f"STREAM FROZEN! Sending freeze alert.")
+                                if SEND_TELEGRAM_ALERT_ON_FREEZE:
+                                    threading.Thread(target=send_freeze_alert_sync).start()
+                                last_freeze_alert_time = time.time()
+                    else:
+                        if freeze_start_time is not None: logging.info("Stream freeze condition resolved.")
+                        freeze_start_time, last_freeze_alert_time = None, None
+                last_frame_signature = current_signature
             
-            last_frame_signature = current_signature
             time.sleep(POLL_INTERVAL)
 
         except KeyboardInterrupt:
@@ -164,17 +177,206 @@ def run_watchdog(debug_mode=False):
             break
         except Exception as e:
             logging.error(f"An unexpected error occurred: {e}", exc_info=True)
-            if cap: cap.release()
-            cap = None
+            if cap: cap.release(); cap = None
             time.sleep(10)
 
     if cap: cap.release()
     logging.info("Watchdog has shut down.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Standalone watchdog for detecting frozen RTMP streams.")
-    parser.add_argument("--debug", action="store_true", help="Run in debug mode to save frame comparisons as images.")
-    args = parser.parse_args()
-    
-    run_watchdog(debug_mode=args.debug)
+    run_watchdog()
 
+## // old
+# # watchdog.py
+# #
+# # v3: A completely standalone script with REPEATED ALERTS.
+# #     - See `config.ini` for `[watchdog]` section to configure.
+# #
+# # To run normally:  python3 watchdog.py
+# # To debug/tune:     python3 watchdog.py --debug
+# #
+
+# import cv2
+# import numpy as np
+# import time
+# import configparser
+# import logging
+# import sys
+# import os
+# import threading
+# import asyncio
+# import argparse
+
+# try:
+#     import telegram
+# except ImportError:
+#     print("Error: The 'python-telegram-bot' library is not installed.")
+#     print("Please install it using: pip install 'python-telegram-bot==13.15'")
+#     sys.exit(1)
+
+# # --- Basic Logging Setup ---
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s - %(levelname)s - [Watchdog] - %(message)s',
+#     stream=sys.stdout,
+# )
+
+# # --- Self-Contained Telegram Function ---
+# def send_telegram_alert_sync():
+#     try:
+#         asyncio.run(send_telegram_alert_async())
+#         logging.info("Successfully sent stream freeze alert to all allowed users.")
+#     except Exception as e:
+#         logging.error(f"An error occurred in the Telegram alert thread: {e}")
+
+# async def send_telegram_alert_async():
+#     bot_token = os.getenv('DVR_YOLOV8_TELEGRAM_BOT_TOKEN')
+#     user_ids_str = os.getenv('DVR_YOLOV8_ALLOWED_TELEGRAM_USERS')
+#     if not bot_token or not user_ids_str:
+#         logging.error("Cannot send Telegram alert. Environment variables for the bot are not set.")
+#         return
+
+#     bot = telegram.Bot(token=bot_token)
+#     user_ids = [int(uid.strip()) for uid in user_ids_str.split(',')]
+    
+#     freeze_message = (
+#         "🚨❄️ <b>STREAM FROZEN</b> ❄️🚨\n\n"
+#         "The watchdog has detected that the video stream has been frozen for a significant duration.\n"
+#         "Please check the source (e.g., OBS)."
+#     )
+
+#     for user_id in user_ids:
+#         try:
+#             await bot.send_message(chat_id=user_id, text=freeze_message, parse_mode="HTML")
+#         except Exception as e:
+#             logging.error(f"Failed to send message to user {user_id}: {e}")
+
+# # --- Main Application ---
+# try:
+#     config = configparser.ConfigParser(interpolation=None)
+#     config.read('config.ini')
+
+#     STREAM_URL = config.get('stream', 'stream_url', fallback='rtmp://127.0.0.1:1935/live/stream')
+#     ENABLE_FREEZE_DETECTOR = config.getboolean('watchdog', 'enable_freeze_detector', fallback=False)
+#     FREEZE_DURATION = config.getint('watchdog', 'freeze_duration', fallback=10)
+#     FREEZE_SENSITIVITY_THRESHOLD = config.getint('watchdog', 'freeze_sensitivity_threshold', fallback=500)
+#     SEND_TELEGRAM_ALERT_ON_FREEZE = config.getboolean('watchdog', 'send_telegram_alert_on_freeze', fallback=True)
+#     POLL_INTERVAL = config.getint('watchdog', 'poll_interval_seconds', fallback=1)
+    
+#     # --- Load New Repeat Alert Settings ---
+#     ENABLE_REPEATED_ALERTS = config.getboolean('watchdog', 'enable_repeated_alerts', fallback=True)
+#     REPEAT_ALERT_INTERVAL = config.getint('watchdog', 'repeat_alert_interval_minutes', fallback=1)
+#     # Convert minutes to seconds for internal use
+#     REPEAT_ALERT_SECONDS = REPEAT_ALERT_INTERVAL * 60
+
+# except Exception as e:
+#     logging.error(f"FATAL: Could not read config.ini. Error: {e}")
+#     sys.exit(1)
+
+# def run_watchdog(debug_mode=False):
+#     if not ENABLE_FREEZE_DETECTOR:
+#         logging.info("Freeze detector is disabled in config.ini. Exiting.")
+#         return
+
+#     logging.info("Starting standalone stream freeze watchdog...")
+#     if ENABLE_REPEATED_ALERTS:
+#         logging.info(f"Repeat alerts are ENABLED and will be sent every {REPEAT_ALERT_INTERVAL} minute(s) if stream remains frozen.")
+#     else:
+#         logging.info("Repeat alerts are DISABLED.")
+
+
+#     last_frame_signature = None
+#     freeze_start_time = None
+#     # --- This now tracks the time of the last alert ---
+#     last_alert_time = None
+#     cap = None
+
+#     while True:
+#         try:
+#             if cap is None or not cap.isOpened():
+#                 logging.info("Attempting to connect to video stream...")
+#                 cap = cv2.VideoCapture(STREAM_URL)
+#                 if not cap.isOpened():
+#                     logging.warning("Failed to connect. Retrying in 10 seconds...")
+#                     time.sleep(10)
+#                     continue
+#                 logging.info("Successfully connected.")
+
+#             ret, frame = cap.read()
+#             if not ret:
+#                 logging.warning("Failed to grab a frame. Reconnecting...")
+#                 cap.release()
+#                 cap = None
+#                 time.sleep(5)
+#                 continue
+
+#             gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+#             current_signature = cv2.resize(gray_frame, (128, 72), interpolation=cv2.INTER_AREA)
+
+#             if last_frame_signature is not None:
+#                 diff_image = cv2.absdiff(last_frame_signature, current_signature)
+#                 diff_sum = int(np.sum(diff_image))
+
+#                 log_message = f"Frame difference: {diff_sum} (Threshold: {FREEZE_SENSITIVITY_THRESHOLD})"
+#                 if freeze_start_time is not None:
+#                     frozen_for = int(time.time() - freeze_start_time)
+#                     log_message += f" | Frozen for: {frozen_for}s"
+#                 logging.info(log_message)
+
+#                 if debug_mode:
+#                     cv2.imwrite("watchdog_debug/current.png", current_signature)
+#                     cv2.imwrite("watchdog_debug/last.png", last_frame_signature)
+#                     cv2.imwrite("watchdog_debug/diff.png", diff_image)
+
+#                 # --- Main Freeze Detection Logic ---
+#                 if diff_sum < FREEZE_SENSITIVITY_THRESHOLD:
+#                     if freeze_start_time is None:
+#                         freeze_start_time = time.time()
+                    
+#                     # --- UPGRADED Alerting Logic ---
+#                     # Check if the initial freeze duration has passed
+#                     if (time.time() - freeze_start_time) > FREEZE_DURATION:
+                        
+#                         # Determine if it's time to send an alert
+#                         time_to_alert = False
+#                         if last_alert_time is None:
+#                             # If we've never sent an alert for this event, send one now.
+#                             time_to_alert = True
+#                         elif ENABLE_REPEATED_ALERTS and (time.time() - last_alert_time) > REPEAT_ALERT_SECONDS:
+#                             # If repeat alerts are on and enough time has passed since the last one.
+#                             time_to_alert = True
+
+#                         if time_to_alert:
+#                             logging.critical(f"STREAM FROZEN! Sending alert.")
+#                             if SEND_TELEGRAM_ALERT_ON_FREEZE:
+#                                 threading.Thread(target=send_telegram_alert_sync).start()
+#                             # Record the time of this alert
+#                             last_alert_time = time.time()
+#                 else:
+#                     # Stream has recovered
+#                     if freeze_start_time is not None:
+#                         logging.info("Stream is active again.")
+#                     freeze_start_time = None
+#                     last_alert_time = None
+            
+#             last_frame_signature = current_signature
+#             time.sleep(POLL_INTERVAL)
+
+#         except KeyboardInterrupt:
+#             logging.info("Watchdog stopped by user.")
+#             break
+#         except Exception as e:
+#             logging.error(f"An unexpected error occurred: {e}", exc_info=True)
+#             if cap: cap.release()
+#             cap = None
+#             time.sleep(10)
+
+#     if cap: cap.release()
+#     logging.info("Watchdog has shut down.")
+
+# if __name__ == "__main__":
+#     parser = argparse.ArgumentParser(description="Standalone watchdog for detecting frozen RTMP streams.")
+#     parser.add_argument("--debug", action="store_true", help="Run in debug mode to save frame comparisons as images.")
+#     args = parser.parse_args()
+    
+#     run_watchdog(debug_mode=args.debug)
