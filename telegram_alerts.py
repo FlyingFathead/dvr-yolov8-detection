@@ -233,6 +233,16 @@ def summary_alert_sender():
                 pending_detections.clear()
                 detection_received_event.clear()  # Reset the event
 
+# warn on freezes
+def send_freeze_alert():
+    """Send a specific alert message for a frozen stream."""
+    freeze_message = (
+        "🚨❄️ <b>STREAM FROZEN</b> ❄️🚨\n\n"
+        "The watchdog has detected that the video stream has been frozen for a significant duration.\n"
+        "Please check the source (e.g., OBS)."
+    )
+    logger.warning("Sending stream freeze alert...")
+    send_alert(freeze_message)
 
 # Initialize message aggregation
 last_detection_time = 0
