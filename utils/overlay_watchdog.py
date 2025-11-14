@@ -110,7 +110,9 @@ def maybe_send_overlay_alert(
     lag_seconds: float | None,
     cfg: dict,
     last_alert_times: dict,
+    restart_requested: bool = False,
 ):
+
     """
     Rate-limited Telegram alerts per 'reason'.
     """
@@ -204,6 +206,12 @@ def maybe_send_overlay_alert(
             f"<b>Difference:</b> {lag_str} s\n\n"
             "An error was detected while reading or interpreting the overlay."
         )
+
+    # If a restart/action was requested, annotate the message WITHOUT revealing any command
+    if restart_requested:
+        msg += "\n\n<b>Action:</b> Restart requested for the stream pipeline."
+        if DRY_RUN_MODE:
+            msg += "\n<b>Note:</b> DRY_RUN_MODE is ON, command was NOT actually executed."
 
     _send_telegram_alert(msg)
     last_alert_times[reason] = now_mono
@@ -307,6 +315,7 @@ def load_overlay_config(path="config.ini"):
     # Telegram settings
     send_telegram_alerts = c.getboolean("send_telegram_alerts", fallback=False)
     telegram_repeat_interval_sec = c.getfloat("telegram_repeat_interval_sec", fallback=60.0)
+    send_startup_telegram = c.getboolean("send_startup_telegram", fallback=True)
 
     # OCR failure escalation
     ocr_fail_threshold_count = c.getint("ocr_fail_threshold_count", fallback=3)
@@ -330,7 +339,8 @@ def load_overlay_config(path="config.ini"):
         "telegram_repeat_interval_sec": telegram_repeat_interval_sec,
         "ocr_fail_threshold_count": ocr_fail_threshold_count,
         "use_env_commands": use_env_commands,
-        "env_command_prefix": env_cmd_prefix,        
+        "env_command_prefix": env_cmd_prefix,
+        "send_startup_telegram": send_startup_telegram,                
     }
 
 def load_watchdog_roi(json_path):
@@ -440,6 +450,59 @@ def grab_one_frame(video_source, on_error_cmd):
     cap.release()
     return frame
 
+# startup notification on tg
+def send_startup_telegram_if_enabled(
+    cfg: dict,
+    video_source: str,
+    roi: tuple[int, int, int, int],
+    on_stuck_cmd: str,
+    on_loop_cmd: str,
+    on_error_cmd: str,
+):
+    """
+    Send a one-time 'watchdog started' info message, if enabled.
+    """
+    if not cfg.get("send_telegram_alerts", False):
+        return
+    if not cfg.get("send_startup_telegram", True):
+        return
+
+    x1, y1, x2, y2 = roi
+    now_local = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z")
+
+    def _flag(name: str, cmd: str) -> str:
+        return f"{name}={'configured' if cmd else 'none'}"
+
+    # msg_lines = [
+    #     "ℹ️ <b>YOLO-DVR OCR WATCHDOG</b> ℹ️",
+    #     "",
+    #     "<b>Status:</b> Overlay watchdog started",
+    #     f"<b>Local time:</b> {now_local}",
+    #     f"<b>Video source:</b> {video_source}",
+    #     f"<b>ROI:</b> x1={x1}, y1={y1}, x2={x2}, y2={y2}",
+    #     "",
+    #     f"<b>DRY_RUN_MODE:</b> {'ON' if DRY_RUN_MODE else 'OFF'}",
+    #     "<b>Commands:</b> "
+    #     + ", ".join(
+    #         [
+    #             _flag("on_stuck_cmd", on_stuck_cmd),
+    #             _flag("on_loop_cmd", on_loop_cmd),
+    #             _flag("on_error_cmd", on_error_cmd),
+    #         ]
+    #     ),
+    # ]
+
+    msg_lines = [
+        "ℹ️ <b>YOLO-DVR OCR WATCHDOG</b> ℹ️",
+        "",
+        "<b>Status:</b> Overlay watchdog started",
+        f"<b>Local time:</b> {now_local}",
+        "",
+        f"<b>DRY_RUN_MODE:</b> {'ON' if DRY_RUN_MODE else 'OFF'}",
+    ]
+
+    _send_telegram_alert("\n".join(msg_lines))
+
 # ---------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------
@@ -472,6 +535,16 @@ def main():
     if enable_realtime_lag:
         logger.info(f"Realtime lag check enabled, max_lag={max_lag}s")
     logger.info(f"OCR fail threshold count: {ocr_fail_threshold}")
+
+    # send startup message on Telegram if enabled
+    send_startup_telegram_if_enabled(
+        cfg,
+        video_source,
+        (x1, y1, x2, y2),
+        on_stuck_cmd,
+        on_loop_cmd,
+        on_error_cmd,
+    )
 
     # Info about command source
     if cfg.get("use_env_commands", False):
@@ -604,9 +677,16 @@ def main():
                         f"{current_ts} < {last_ts}"
                     )
                     if backward_resets >= loop_reset_threshold:
+                        restart_requested = bool(on_loop_cmd)
                         run_command(on_loop_cmd, "deadloop")
                         maybe_send_overlay_alert(
-                            "deadloop", current_ts, now_wall, lag, cfg, last_alert_times
+                            "deadloop",
+                            current_ts,
+                            now_wall,
+                            lag,
+                            cfg,
+                            last_alert_times,
+                            restart_requested=restart_requested,
                         )
                         backward_resets = 0
                     # do not update last_ts/last_ts_change_mono
@@ -617,10 +697,19 @@ def main():
             # Stuck detection: overlay hasn't changed for stuck_threshold
             age = now_mono - last_ts_change_mono
             if age >= stuck_threshold:
-                logger.error(f"Overlay timestamp stuck for {age:.1f}s (>= {stuck_threshold}).")
+                logger.error(
+                    f"Overlay timestamp stuck for {age:.1f}s (>= {stuck_threshold})."
+                )
+                restart_requested = bool(on_stuck_cmd)
                 run_command(on_stuck_cmd, "frozen_overlay")
                 maybe_send_overlay_alert(
-                    "frozen_overlay", current_ts, now_wall, lag, cfg, last_alert_times
+                    "frozen_overlay",
+                    current_ts,
+                    now_wall,
+                    lag,
+                    cfg,
+                    last_alert_times,
+                    restart_requested=restart_requested,
                 )
                 last_ts_change_mono = now_mono
 
@@ -630,9 +719,16 @@ def main():
                     logger.error(
                         f"Overlay time lagging behind real time by {lag:.1f}s (> {max_lag})."
                     )
+                    restart_requested = bool(on_stuck_cmd)
                     run_command(on_stuck_cmd, "lagging_overlay")
                     maybe_send_overlay_alert(
-                        "lagging_overlay", current_ts, now_wall, lag, cfg, last_alert_times
+                        "lagging_overlay",
+                        current_ts,
+                        now_wall,
+                        lag,
+                        cfg,
+                        last_alert_times,
+                        restart_requested=restart_requested,
                     )
 
             time.sleep(poll_interval)
