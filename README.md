@@ -286,6 +286,12 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **0.1626**
+  - Created a separate ROI watchdog module that can be used for various uses, including delay compensation and lag warnings from on-stream data, Telegram alerts and auto-restarts when needed
+  - (See: `utils/overlay_watchdog.py`)
+  - The ROI watchdog module uses Tesseract/pytesseract (separate install required) to read timestamps from the stream and warn/restart in case of excess lag or time discrepancy
+  - You can use the region masker (at `utils/region_masker.py`) to create your own ROI for the OCR watchdog
+  - The same module can be further enhanced for other OCR purposes (go ahead and fork it yourself)
 - **0.1625** 
   - Added a separate `watchdog.py` utility for stream freeze situations
   - Configurable via `config.ini`, Telegram alerts available

@@ -1,3 +1,3 @@
 # version.py
 
-version_number = "0.1625 (Jul 23 2025)"
+version_number = "0.1626 (Nov 14 2025)"

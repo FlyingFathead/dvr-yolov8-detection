@@ -1,4 +1,6 @@
-#
+# local environment
+.env
+
 # Ignore YOLO model files
 *.pt
 *.pth
