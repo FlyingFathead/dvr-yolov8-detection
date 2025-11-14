@@ -184,6 +184,16 @@ def maybe_send_overlay_alert(
             "timestamp layout.\n"
             "Overlay may be distorted, hidden behind graphics, or the format changed."
         )
+    elif reason == "overlay_recovered":
+        # "All clear" message when OCR has been bad and now returns to normal
+        msg = (
+            "✅ <b>YOLO-DVR OCR WATCHDOG</b> ✅\n\n"
+            "<b>Status:</b> Overlay timestamp readable again\n"
+            f"<b>Overlay time:</b> {overlay_str}\n"
+            f"<b>System time:</b>  {now_str}\n"
+            f"<b>Difference:</b> {lag_str} s\n\n"
+            "OCR is once again returning a valid timestamp for the configured overlay region."
+        )
     else:
         # Generic error / open_failed / read_failed / empty_roi
         msg = (
@@ -508,15 +518,19 @@ def main():
                 time.sleep(poll_interval)
                 continue
 
-            # Got a valid timestamp -> reset bad OCR streak
-            bad_ocr_count = 0
-
-            # How far behind/ahead is overlay vs system time?
+            # Got a valid timestamp: compute lag first
             lag = (now_wall - current_ts).total_seconds()
 
-            # // old info
-            # logger.info(f"Overlay time: {current_ts.strftime('%Y-%m-%d %H:%M:%S')}")
-            
+            # If we had a long run of bad OCR before this, send an "all clear"
+            if bad_ocr_count >= ocr_fail_threshold:
+                logger.info("OCR recovered: overlay timestamp readable again.")
+                maybe_send_overlay_alert(
+                    "overlay_recovered", current_ts, now_wall, lag, cfg, last_alert_times
+                )
+
+            # Reset bad OCR streak
+            bad_ocr_count = 0
+
             # Nice human-readable lag info
             if abs(lag) < 0.5:
                 lag_info = " (in sync)"
