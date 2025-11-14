@@ -310,6 +310,9 @@ def load_overlay_config(path="config.ini"):
     enable_realtime_lag_check = c.getboolean("enable_realtime_lag_check", fallback=False)
     max_realtime_lag_seconds = c.getfloat("max_realtime_lag_seconds", fallback=120.0)
 
+    # Global restart cooldown (seconds) – 0 = disabled (no cooldown)
+    restart_cooldown_sec = c.getfloat("restart_cooldown_sec", fallback=30.0)
+
     # Soft lag warning (no restart, just warns)
     lag_warn_enable = c.getboolean("lag_warn_enable", fallback=True)
     lag_warn_threshold_seconds = c.getfloat(
@@ -367,6 +370,7 @@ def load_overlay_config(path="config.ini"):
         "lag_warn_enable": lag_warn_enable,
         "lag_warn_threshold_seconds": lag_warn_threshold_seconds,
         "lag_warn_send_telegram": lag_warn_send_telegram,
+        "restart_cooldown_sec": restart_cooldown_sec,        
     }
 
 def load_watchdog_roi(json_path):
@@ -547,6 +551,7 @@ def main():
     lag_warn_enable = cfg["lag_warn_enable"]
     lag_warn_threshold = cfg["lag_warn_threshold_seconds"]
     lag_warn_send_telegram = cfg["lag_warn_send_telegram"]
+    restart_cooldown_sec = cfg["restart_cooldown_sec"]    
     tess_psm = cfg["tesseract_psm"]
     tess_whitelist = cfg["tesseract_whitelist"]
     on_stuck_cmd = cfg["on_stuck_cmd"]
@@ -567,6 +572,10 @@ def main():
         logger.info(
             f"Soft lag warning enabled, threshold={lag_warn_threshold:.1f}s"
         )
+    if restart_cooldown_sec > 0:
+        logger.info(f"Restart cooldown: {restart_cooldown_sec:.1f}s")
+    else:
+        logger.info("Restart cooldown disabled (restart_cooldown_sec <= 0)")
     logger.info(f"OCR fail threshold count: {ocr_fail_threshold}")
 
     # send startup message on Telegram if enabled
@@ -614,6 +623,7 @@ def main():
     backward_resets = 0
     last_alert_times: dict[str, float] = {}
     bad_ocr_count = 0  # consecutive empty or unparseable OCR results
+    last_restart_mono: float | None = None  # last time we actually issued a restart
 
     try:
         while True:
@@ -727,8 +737,27 @@ def main():
                         f"{current_ts} < {last_ts}"
                     )
                     if backward_resets >= loop_reset_threshold:
-                        restart_requested = bool(on_loop_cmd)
-                        run_command(on_loop_cmd, "deadloop")
+                        restart_requested = False
+                        if on_loop_cmd:
+                            elapsed = (
+                                None if last_restart_mono is None
+                                else now_mono - last_restart_mono
+                            )
+                            if (
+                                restart_cooldown_sec <= 0
+                                or last_restart_mono is None
+                                or elapsed >= restart_cooldown_sec
+                            ):
+                                restart_requested = True
+                                run_command(on_loop_cmd, "deadloop")
+                                last_restart_mono = now_mono
+                            else:
+                                logger.warning(
+                                    "Restart suppressed due to cooldown: "
+                                    f"{elapsed:.1f}s since last restart "
+                                    f"(< {restart_cooldown_sec:.1f}s)."
+                                )
+
                         maybe_send_overlay_alert(
                             "deadloop",
                             current_ts,
@@ -750,8 +779,27 @@ def main():
                 logger.error(
                     f"Overlay timestamp stuck for {age:.1f}s (>= {stuck_threshold})."
                 )
-                restart_requested = bool(on_stuck_cmd)
-                run_command(on_stuck_cmd, "frozen_overlay")
+                restart_requested = False
+                if on_stuck_cmd:
+                    elapsed = (
+                        None if last_restart_mono is None
+                        else now_mono - last_restart_mono
+                    )
+                    if (
+                        restart_cooldown_sec <= 0
+                        or last_restart_mono is None
+                        or elapsed >= restart_cooldown_sec
+                    ):
+                        restart_requested = True
+                        run_command(on_stuck_cmd, "frozen_overlay")
+                        last_restart_mono = now_mono
+                    else:
+                        logger.warning(
+                            "Restart suppressed due to cooldown: "
+                            f"{elapsed:.1f}s since last restart "
+                            f"(< {restart_cooldown_sec:.1f}s)."
+                        )
+
                 maybe_send_overlay_alert(
                     "frozen_overlay",
                     current_ts,
@@ -769,8 +817,27 @@ def main():
                     logger.error(
                         f"Overlay time lagging behind real time by {lag:.1f}s (> {max_lag})."
                     )
-                    restart_requested = bool(on_stuck_cmd)
-                    run_command(on_stuck_cmd, "lagging_overlay")
+                    restart_requested = False
+                    if on_stuck_cmd:
+                        elapsed = (
+                            None if last_restart_mono is None
+                            else now_mono - last_restart_mono
+                        )
+                        if (
+                            restart_cooldown_sec <= 0
+                            or last_restart_mono is None
+                            or elapsed >= restart_cooldown_sec
+                        ):
+                            restart_requested = True
+                            run_command(on_stuck_cmd, "lagging_overlay")
+                            last_restart_mono = now_mono
+                        else:
+                            logger.warning(
+                                "Restart suppressed due to cooldown: "
+                                f"{elapsed:.1f}s since last restart "
+                                f"(< {restart_cooldown_sec:.1f}s)."
+                            )
+
                     maybe_send_overlay_alert(
                         "lagging_overlay",
                         current_ts,
