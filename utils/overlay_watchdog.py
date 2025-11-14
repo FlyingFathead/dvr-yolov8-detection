@@ -166,6 +166,15 @@ def maybe_send_overlay_alert(
             "The on-screen timestamp appears to be looping backwards.\n"
             "This usually indicates a replaying buffer or encoder loop."
         )
+    elif reason == "empty_overlay":
+        msg = (
+            "⚠️ <b>YOLO-DVR OCR WATCHDOG</b> ⚠️\n\n"
+            "<b>Reason:</b> Timestamp overlay missing or unreadable\n"
+            f"<b>Overlay time:</b> {overlay_str}\n"
+            f"<b>System time:</b>  {now_str}\n\n"
+            "OCR returned an empty result for the timestamp region.\n"
+            "Overlay may be hidden, obstructed, or changed format."
+        )
     else:
         # Generic error / open_failed / read_failed / empty_roi
         msg = (
@@ -342,6 +351,10 @@ def clean_ocr_text(text: str) -> str:
     return text
 
 def ocr_timestamp(roi_bgr, timestamp_format, tess_psm, tess_whitelist):
+    """
+    Returns (parsed_datetime_or_None, cleaned_text).
+    cleaned_text is always the postprocessed OCR string (possibly empty).
+    """
     gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
     gray = cv2.resize(gray, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_LINEAR)
     _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
@@ -351,21 +364,23 @@ def ocr_timestamp(roi_bgr, timestamp_format, tess_psm, tess_whitelist):
     raw = pytesseract.image_to_string(bw, config=tess_cfg)
     cleaned = clean_ocr_text(raw)
 
-    # Always show what Tesseract actually saw
-    logger.info(f"OCR raw='{raw.strip()}' cleaned='{cleaned}'")
-
     if not cleaned:
-        return None
+        # Empty OCR is definitely suspicious
+        logger.warning(f"OCR timestamp EMPTY. raw='{raw.strip()}' cleaned='{cleaned}'")
+        return None, cleaned
+
+    # Normal OCR log for analysis
+    logger.info(f"OCR raw='{raw.strip()}' cleaned='{cleaned}'")
 
     try:
         # Normalize spaces so 1 vs 2 spaces don't matter
         norm_text = re.sub(r"\s+", " ", cleaned)
         norm_fmt = re.sub(r"\s+", " ", timestamp_format)
         dt = datetime.strptime(norm_text, norm_fmt)
-        return dt
+        return dt, cleaned
     except Exception as e:
         logger.warning(f"Failed to parse '{cleaned}' with format '{timestamp_format}': {e}")
-        return None
+        return None, cleaned
 
 def grab_one_frame(video_source, on_error_cmd):
     """
@@ -452,7 +467,19 @@ def main():
                 time.sleep(poll_interval)
                 continue
 
-            current_ts = ocr_timestamp(roi, timestamp_format, tess_psm, tess_whitelist)
+            current_ts, cleaned_text = ocr_timestamp(
+                roi, timestamp_format, tess_psm, tess_whitelist
+            )
+
+            # Case 1: OCR completely empty -> warn + Telegram
+            if not cleaned_text:
+                maybe_send_overlay_alert(
+                    "empty_overlay", None, now_wall, None, cfg, last_alert_times
+                )
+                time.sleep(poll_interval)
+                continue
+
+            # Case 2: Some text, but parse failed -> we logged warning already, just skip
             if current_ts is None:
                 time.sleep(poll_interval)
                 continue
