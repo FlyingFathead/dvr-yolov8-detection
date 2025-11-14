@@ -277,6 +277,8 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 
 ## TODO
 
+- WIP: Separate watchdog(s) for stream stability monitoring
+    - automated restarts if and when needed
 - Implement more error handling for edge cases
 - Refactor code for improved modularity
 - Add setup scripts for easier deployment
