@@ -129,7 +129,6 @@ def maybe_send_overlay_alert(
     now_str = now_wall.strftime("%Y-%m-%d %H:%M:%S") if now_wall else "unknown"
     lag_str = f"{lag_seconds:.1f}" if lag_seconds is not None else "N/A"
 
-    # Build a reason-specific message
     if reason == "frozen_overlay":
         threshold = cfg.get("stuck_threshold_sec", 0.0)
         msg = (
@@ -169,11 +168,21 @@ def maybe_send_overlay_alert(
     elif reason == "empty_overlay":
         msg = (
             "⚠️ <b>YOLO-DVR OCR WATCHDOG</b> ⚠️\n\n"
-            "<b>Reason:</b> Timestamp overlay missing or unreadable\n"
+            "<b>Reason:</b> Timestamp overlay missing or unreadable (empty OCR)\n"
             f"<b>Overlay time:</b> {overlay_str}\n"
             f"<b>System time:</b>  {now_str}\n\n"
-            "OCR returned an empty result for the timestamp region.\n"
+            "OCR returned an empty result for the timestamp region repeatedly.\n"
             "Overlay may be hidden, obstructed, or changed format."
+        )
+    elif reason == "unparseable_overlay":
+        msg = (
+            "⚠️ <b>YOLO-DVR OCR WATCHDOG</b> ⚠️\n\n"
+            "<b>Reason:</b> Timestamp text repeatedly unparseable\n"
+            f"<b>Overlay time:</b> {overlay_str}\n"
+            f"<b>System time:</b>  {now_str}\n\n"
+            "OCR keeps returning garbage or text that does not match the expected "
+            "timestamp layout.\n"
+            "Overlay may be distorted, hidden behind graphics, or the format changed."
         )
     else:
         # Generic error / open_failed / read_failed / empty_roi
@@ -278,6 +287,9 @@ def load_overlay_config(path="config.ini"):
     send_telegram_alerts = c.getboolean("send_telegram_alerts", fallback=False)
     telegram_repeat_interval_sec = c.getfloat("telegram_repeat_interval_sec", fallback=60.0)
 
+    # OCR failure escalation
+    ocr_fail_threshold_count = c.getint("ocr_fail_threshold_count", fallback=3)
+
     return {
         "video_source": video_source,
         "watchdog_zone_json": watchdog_zone_json,
@@ -295,6 +307,7 @@ def load_overlay_config(path="config.ini"):
         "on_error_cmd": on_error_cmd,
         "send_telegram_alerts": send_telegram_alerts,
         "telegram_repeat_interval_sec": telegram_repeat_interval_sec,
+        "ocr_fail_threshold_count": ocr_fail_threshold_count,
     }
 
 def load_watchdog_roi(json_path):
@@ -424,6 +437,7 @@ def main():
     on_stuck_cmd = cfg["on_stuck_cmd"]
     on_loop_cmd = cfg["on_loop_cmd"]
     on_error_cmd = cfg["on_error_cmd"]
+    ocr_fail_threshold = cfg["ocr_fail_threshold_count"]
 
     logger.info("Starting overlay OCR watchdog.")
     if DRY_RUN_MODE:
@@ -434,11 +448,13 @@ def main():
     logger.info(f"Timestamp format (strptime): {timestamp_format}")
     if enable_realtime_lag:
         logger.info(f"Realtime lag check enabled, max_lag={max_lag}s")
+    logger.info(f"OCR fail threshold count: {ocr_fail_threshold}")
 
     last_ts = None
     last_ts_change_mono = time.monotonic()
     backward_resets = 0
     last_alert_times: dict[str, float] = {}
+    bad_ocr_count = 0  # consecutive empty or unparseable OCR results
 
     try:
         while True:
@@ -471,18 +487,29 @@ def main():
                 roi, timestamp_format, tess_psm, tess_whitelist
             )
 
-            # Case 1: OCR completely empty -> warn + Telegram
+            # Handle OCR failures: empty or unparseable
             if not cleaned_text:
-                maybe_send_overlay_alert(
-                    "empty_overlay", None, now_wall, None, cfg, last_alert_times
-                )
+                bad_ocr_count += 1
+                logger.warning(f"OCR empty ({bad_ocr_count} consecutive)")
+                if bad_ocr_count >= ocr_fail_threshold:
+                    maybe_send_overlay_alert(
+                        "empty_overlay", None, now_wall, None, cfg, last_alert_times
+                    )
                 time.sleep(poll_interval)
                 continue
 
-            # Case 2: Some text, but parse failed -> we logged warning already, just skip
             if current_ts is None:
+                bad_ocr_count += 1
+                logger.warning(f"OCR unparseable ({bad_ocr_count} consecutive)")
+                if bad_ocr_count >= ocr_fail_threshold:
+                    maybe_send_overlay_alert(
+                        "unparseable_overlay", None, now_wall, None, cfg, last_alert_times
+                    )
                 time.sleep(poll_interval)
                 continue
+
+            # Got a valid timestamp -> reset bad OCR streak
+            bad_ocr_count = 0
 
             # How far behind/ahead is overlay vs system time?
             lag = (now_wall - current_ts).total_seconds()
