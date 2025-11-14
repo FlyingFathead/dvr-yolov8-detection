@@ -38,7 +38,8 @@ from datetime import datetime
 # Global switches
 # ---------------------------------------------------------------------
 # Set this to False once you're happy with behavior
-DRY_RUN_MODE = True
+DRY_RUN_MODE = False
+# DRY_RUN_MODE = True
 
 # ---------------------------------------------------------------------
 # Logging
@@ -703,21 +704,33 @@ def main():
             )
 
             # Soft lag warning (no restart, just warning/TG)
-            if lag > 0 and lag_warn_enable and lag > lag_warn_threshold:
-                logger.warning(
-                    f"Overlay lag {lag:.1f}s exceeds soft warning threshold "
-                    f"{lag_warn_threshold:.1f}s."
-                )
-                if lag_warn_send_telegram:
-                    maybe_send_overlay_alert(
-                        "lag_warning",
-                        current_ts,
-                        now_wall,
-                        lag,
-                        cfg,
-                        last_alert_times,
-                        restart_requested=False,
+            if lag > 0 and lag_warn_enable:
+                send_soft_warning = False
+
+                if enable_realtime_lag and max_lag > 0:
+                    # Only send "lag_warning" if we are between soft and hard thresholds
+                    if lag_warn_threshold < lag <= max_lag:
+                        send_soft_warning = True
+                else:
+                    # No hard threshold – just use the soft one
+                    if lag > lag_warn_threshold:
+                        send_soft_warning = True
+
+                if send_soft_warning:
+                    logger.warning(
+                        f"Overlay lag {lag:.1f}s exceeds soft warning threshold "
+                        f"{lag_warn_threshold:.1f}s."
                     )
+                    if lag_warn_send_telegram:
+                        maybe_send_overlay_alert(
+                            "lag_warning",
+                            current_ts,
+                            now_wall,
+                            lag,
+                            cfg,
+                            last_alert_times,
+                            restart_requested=False,
+                        )
 
             # --- deadloop / frozen time detection ---
             if last_ts is None:
