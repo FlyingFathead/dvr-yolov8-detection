@@ -514,7 +514,20 @@ def main():
             # How far behind/ahead is overlay vs system time?
             lag = (now_wall - current_ts).total_seconds()
 
-            logger.info(f"Overlay time: {current_ts.strftime('%Y-%m-%d %H:%M:%S')}")
+            # // old info
+            # logger.info(f"Overlay time: {current_ts.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # Nice human-readable lag info
+            if abs(lag) < 0.5:
+                lag_info = " (in sync)"
+            elif lag > 0:
+                lag_info = f" (lagging {lag:.1f} sec behind)"
+            else:
+                lag_info = f" (ahead {abs(lag):.1f} sec)"
+
+            logger.info(
+                f"Overlay time: {current_ts.strftime('%Y-%m-%d %H:%M:%S')}{lag_info}"
+            )
 
             # --- deadloop / frozen time detection ---
             if last_ts is None:
