@@ -10,11 +10,15 @@ Overlay OCR watchdog:
     * Frozen overlay time (no change for stuck_threshold_sec).
     * Deadloop (time jumping backwards repeatedly).
     * Optional: overlay lagging behind system time for too long.
-- Runs configured shell commands on stuck/loop/error.
+- Can send Telegram alerts and run shell commands on stuck/loop/error.
 
 Requires:
-    pip install opencv-python pytesseract
+    pip install opencv-python pytesseract python-telegram-bot
     tesseract-ocr installed system-wide.
+
+Env vars for Telegram (same as main watchdog):
+    DVR_YOLOV8_TELEGRAM_BOT_TOKEN
+    DVR_YOLOV8_ALLOWED_TELEGRAM_USERS   (comma-separated user IDs)
 """
 
 import cv2
@@ -27,6 +31,7 @@ import re
 import subprocess
 import sys
 import time
+import asyncio
 from datetime import datetime
 
 # ---------------------------------------------------------------------
@@ -49,9 +54,135 @@ ch.setFormatter(formatter)
 logger.addHandler(ch)
 
 # ---------------------------------------------------------------------
+# Telegram (optional)
+# ---------------------------------------------------------------------
+try:
+    import telegram
+except ImportError:
+    telegram = None
+    logger.warning(
+        "python-telegram-bot is not installed; Telegram alerts will be DISABLED "
+        "for overlay_watchdog."
+    )
+
+def _send_telegram_alert(message: str):
+    """
+    Fire-and-forget Telegram sender using same env vars as the main watchdog.
+    """
+    if telegram is None:
+        logger.error("Telegram library not available, cannot send alert.")
+        return
+
+    async def send_async():
+        bot_token = os.getenv("DVR_YOLOV8_TELEGRAM_BOT_TOKEN")
+        user_ids_str = os.getenv("DVR_YOLOV8_ALLOWED_TELEGRAM_USERS")
+
+        if not bot_token or not user_ids_str:
+            logger.error(
+                "Cannot send Telegram alert. "
+                "DVR_YOLOV8_TELEGRAM_BOT_TOKEN or DVR_YOLOV8_ALLOWED_TELEGRAM_USERS not set."
+            )
+            return
+
+        bot = telegram.Bot(token=bot_token)
+        user_ids = [int(uid.strip()) for uid in user_ids_str.split(",") if uid.strip()]
+
+        for user_id in user_ids:
+            try:
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=message,
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                logger.error(f"Failed to send Telegram message to user {user_id}: {e}")
+
+    try:
+        asyncio.run(send_async())
+        logger.info("Overlay watchdog alert sent to all allowed Telegram users.")
+    except Exception as e:
+        logger.error(f"Error while sending Telegram alert: {e}")
+
+def maybe_send_overlay_alert(
+    reason: str,
+    overlay_ts: datetime | None,
+    now_wall: datetime | None,
+    lag_seconds: float | None,
+    cfg: dict,
+    last_alert_times: dict,
+):
+    """
+    Rate-limited Telegram alerts per 'reason'.
+    """
+    if not cfg.get("send_telegram_alerts", False):
+        return
+
+    interval = cfg.get("telegram_repeat_interval_sec", 60.0)
+    now_mono = time.monotonic()
+    last = last_alert_times.get(reason)
+
+    if last is not None and interval > 0 and (now_mono - last) < interval:
+        # Too soon since last alert of this type
+        return
+
+    overlay_str = overlay_ts.strftime("%Y-%m-%d %H:%M:%S") if overlay_ts else "unknown"
+    now_str = now_wall.strftime("%Y-%m-%d %H:%M:%S") if now_wall else "unknown"
+    lag_str = f"{lag_seconds:.1f}" if lag_seconds is not None else "N/A"
+
+    # Build a reason-specific message
+    if reason == "frozen_overlay":
+        threshold = cfg.get("stuck_threshold_sec", 0.0)
+        msg = (
+            "⚠️ <b>YOLO-DVR OCR WATCHDOG</b> ⚠️\n\n"
+            "<b>Reason:</b> Frozen overlay timestamp\n"
+            f"<b>Overlay time:</b> {overlay_str}\n"
+            f"<b>System time:</b>  {now_str}\n"
+            f"<b>Difference:</b> {lag_str} s\n"
+            f"<b>Stuck threshold:</b> {threshold:.1f} s\n\n"
+            "The on-screen timestamp has not advanced as expected.\n"
+            "Stream may be frozen or replaying old content."
+        )
+    elif reason == "lagging_overlay":
+        threshold = cfg.get("max_realtime_lag_seconds", 0.0)
+        msg = (
+            "⚠️ <b>YOLO-DVR OCR WATCHDOG</b> ⚠️\n\n"
+            "<b>Reason:</b> Overlay timestamp lagging behind realtime\n"
+            f"<b>Overlay time:</b> {overlay_str}\n"
+            f"<b>System time:</b>  {now_str}\n"
+            f"<b>Difference:</b> {lag_str} s\n"
+            f"<b>Lag threshold:</b> {threshold:.1f} s\n\n"
+            "The overlay time is significantly behind realtime.\n"
+            "Source may be stuck, looping, or heavily delayed."
+        )
+    elif reason == "deadloop":
+        loop_thr = cfg.get("loop_reset_threshold", 0)
+        msg = (
+            "⚠️ <b>YOLO-DVR OCR WATCHDOG</b> ⚠️\n\n"
+            "<b>Reason:</b> Overlay timestamp jumped backwards repeatedly\n"
+            f"<b>Overlay time:</b> {overlay_str}\n"
+            f"<b>System time:</b>  {now_str}\n"
+            f"<b>Difference:</b> {lag_str} s\n"
+            f"<b>Loop detection threshold:</b> {loop_thr} backward jumps\n\n"
+            "The on-screen timestamp appears to be looping backwards.\n"
+            "This usually indicates a replaying buffer or encoder loop."
+        )
+    else:
+        # Generic error / open_failed / read_failed / empty_roi
+        msg = (
+            "⚠️ <b>YOLO-DVR OCR WATCHDOG</b> ⚠️\n\n"
+            f"<b>Reason:</b> {reason}\n"
+            f"<b>Overlay time:</b> {overlay_str}\n"
+            f"<b>System time:</b>  {now_str}\n"
+            f"<b>Difference:</b> {lag_str} s\n\n"
+            "An error was detected while reading or interpreting the overlay."
+        )
+
+    _send_telegram_alert(msg)
+    last_alert_times[reason] = now_mono
+
+# ---------------------------------------------------------------------
 # Helpers: timestamp layout -> strptime format
 # ---------------------------------------------------------------------
-
 def layout_to_strftime(layout: str) -> str:
     """
     Convert a human layout like "DD/MM/YYYY  HH:MM:SS" into a Python
@@ -134,6 +265,10 @@ def load_overlay_config(path="config.ini"):
     on_loop_cmd = c.get("on_loop_cmd", fallback="").strip()
     on_error_cmd = c.get("on_error_cmd", fallback="").strip()
 
+    # Telegram settings
+    send_telegram_alerts = c.getboolean("send_telegram_alerts", fallback=False)
+    telegram_repeat_interval_sec = c.getfloat("telegram_repeat_interval_sec", fallback=60.0)
+
     return {
         "video_source": video_source,
         "watchdog_zone_json": watchdog_zone_json,
@@ -149,6 +284,8 @@ def load_overlay_config(path="config.ini"):
         "on_stuck_cmd": on_stuck_cmd,
         "on_loop_cmd": on_loop_cmd,
         "on_error_cmd": on_error_cmd,
+        "send_telegram_alerts": send_telegram_alerts,
+        "telegram_repeat_interval_sec": telegram_repeat_interval_sec,
     }
 
 def load_watchdog_roi(json_path):
@@ -184,6 +321,7 @@ def run_command(cmd, reason):
     try:
         env = os.environ.copy()
         env["WD_REASON"] = reason
+        env["WD_SOURCE"] = "overlay_ocr"
         subprocess.run(cmd, shell=True, env=env, check=False)
     except Exception as e:
         logger.error(f"Error running command '{cmd}': {e}")
@@ -285,6 +423,7 @@ def main():
     last_ts = None
     last_ts_change_mono = time.monotonic()
     backward_resets = 0
+    last_alert_times: dict[str, float] = {}
 
     try:
         while True:
@@ -307,6 +446,9 @@ def main():
             if roi.size == 0:
                 logger.error("ROI is empty after clamping. Check watchdog_zone.json or stream resolution.")
                 run_command(on_error_cmd, "empty_roi")
+                maybe_send_overlay_alert(
+                    "empty_roi", None, now_wall, None, cfg, last_alert_times
+                )
                 time.sleep(poll_interval)
                 continue
 
@@ -314,6 +456,9 @@ def main():
             if current_ts is None:
                 time.sleep(poll_interval)
                 continue
+
+            # How far behind/ahead is overlay vs system time?
+            lag = (now_wall - current_ts).total_seconds()
 
             logger.info(f"Overlay time: {current_ts.strftime('%Y-%m-%d %H:%M:%S')}")
 
@@ -336,6 +481,9 @@ def main():
                     )
                     if backward_resets >= loop_reset_threshold:
                         run_command(on_loop_cmd, "deadloop")
+                        maybe_send_overlay_alert(
+                            "deadloop", current_ts, now_wall, lag, cfg, last_alert_times
+                        )
                         backward_resets = 0
                     # do not update last_ts/last_ts_change_mono
                 else:
@@ -347,14 +495,21 @@ def main():
             if age >= stuck_threshold:
                 logger.error(f"Overlay timestamp stuck for {age:.1f}s (>= {stuck_threshold}).")
                 run_command(on_stuck_cmd, "frozen_overlay")
+                maybe_send_overlay_alert(
+                    "frozen_overlay", current_ts, now_wall, lag, cfg, last_alert_times
+                )
                 last_ts_change_mono = now_mono
 
             # Optional: realtime lag detection
             if enable_realtime_lag:
-                lag = (now_wall - current_ts).total_seconds()
                 if lag > max_lag:
-                    logger.error(f"Overlay time lagging behind real time by {lag:.1f}s (> {max_lag}).")
+                    logger.error(
+                        f"Overlay time lagging behind real time by {lag:.1f}s (> {max_lag})."
+                    )
                     run_command(on_stuck_cmd, "lagging_overlay")
+                    maybe_send_overlay_alert(
+                        "lagging_overlay", current_ts, now_wall, lag, cfg, last_alert_times
+                    )
 
             time.sleep(poll_interval)
 
