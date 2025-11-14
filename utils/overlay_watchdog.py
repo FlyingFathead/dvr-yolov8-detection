@@ -289,9 +289,20 @@ def load_overlay_config(path="config.ini"):
     tesseract_psm = c.get("tesseract_psm", fallback="7")
     tesseract_whitelist = c.get("tesseract_whitelist", fallback="0123456789/: ")
 
-    on_stuck_cmd = c.get("on_stuck_cmd", fallback="").strip()
-    on_loop_cmd = c.get("on_loop_cmd", fallback="").strip()
-    on_error_cmd = c.get("on_error_cmd", fallback="").strip()
+    # ---- command source: env vs config.ini ----
+    use_env_commands = c.getboolean("use_env_commands", fallback=True)
+    env_cmd_prefix = c.get("env_command_prefix", fallback="DVR_OVERLAY_")
+
+    if use_env_commands:
+        # Read from environment (e.g. loaded via .yolo_env / .env)
+        on_stuck_cmd = os.getenv(f"{env_cmd_prefix}ON_STUCK_CMD", "").strip()
+        on_loop_cmd  = os.getenv(f"{env_cmd_prefix}ON_LOOP_CMD", "").strip()
+        on_error_cmd = os.getenv(f"{env_cmd_prefix}ON_ERROR_CMD", "").strip()
+    else:
+        # Read directly from config.ini
+        on_stuck_cmd = c.get("on_stuck_cmd", fallback="").strip()
+        on_loop_cmd  = c.get("on_loop_cmd", fallback="").strip()
+        on_error_cmd = c.get("on_error_cmd", fallback="").strip()
 
     # Telegram settings
     send_telegram_alerts = c.getboolean("send_telegram_alerts", fallback=False)
@@ -318,6 +329,8 @@ def load_overlay_config(path="config.ini"):
         "send_telegram_alerts": send_telegram_alerts,
         "telegram_repeat_interval_sec": telegram_repeat_interval_sec,
         "ocr_fail_threshold_count": ocr_fail_threshold_count,
+        "use_env_commands": use_env_commands,
+        "env_command_prefix": env_cmd_prefix,        
     }
 
 def load_watchdog_roi(json_path):
@@ -459,6 +472,36 @@ def main():
     if enable_realtime_lag:
         logger.info(f"Realtime lag check enabled, max_lag={max_lag}s")
     logger.info(f"OCR fail threshold count: {ocr_fail_threshold}")
+
+    # Info about command source
+    if cfg.get("use_env_commands", False):
+        logger.info(
+            "Overlay watchdog commands sourced from ENV "
+            f"(prefix='{cfg.get('env_command_prefix')}')."
+        )
+    else:
+        logger.info("Overlay watchdog commands sourced from config.ini.")
+
+    # Warn if nothing is configured
+    if not on_stuck_cmd and not on_loop_cmd and not on_error_cmd:
+        logger.warning(
+            "No overlay watchdog commands configured "
+            "(on_stuck_cmd/on_loop_cmd/on_error_cmd all empty). "
+            "Watchdog will NOT run any shell actions; only logging/Telegram."
+        )
+    else:
+        if not on_stuck_cmd:
+            logger.info(
+                "on_stuck_cmd is empty – frozen overlay will NOT trigger a shell command."
+            )
+        if not on_loop_cmd:
+            logger.info(
+                "on_loop_cmd is empty – deadloop overlay will NOT trigger a shell command."
+            )
+        if not on_error_cmd:
+            logger.info(
+                "on_error_cmd is empty – open/read/ROI errors will NOT trigger a shell command."
+            )
 
     last_ts = None
     last_ts_change_mono = time.monotonic()
