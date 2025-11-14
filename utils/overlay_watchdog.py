@@ -120,6 +120,10 @@ def maybe_send_overlay_alert(
     if not cfg.get("send_telegram_alerts", False):
         return
 
+    # Allow turning off all "..._recovered" notifications
+    if reason.endswith("_recovered") and not cfg.get("send_recovery_alerts", True):
+        return
+
     # Optional separate switch for soft lag warnings
     if reason == "lag_warning" and not cfg.get("lag_warn_send_telegram", True):
         return
@@ -212,6 +216,27 @@ def maybe_send_overlay_alert(
             f"<b>System time:</b>  {now_str}\n"
             f"<b>Difference:</b> {lag_str} s\n\n"
             "OCR is once again returning a valid timestamp for the configured overlay region."
+        )
+    elif reason == "lagging_overlay_recovered":
+        threshold = cfg.get("max_realtime_lag_seconds", 0.0)
+        msg = (
+            "✅ <b>YOLO-DVR OCR WATCHDOG</b> ✅\n\n"
+            "<b>Status:</b> Overlay lag back within acceptable range\n"
+            f"<b>Overlay time:</b> {overlay_str}\n"
+            f"<b>System time:</b>  {now_str}\n"
+            f"<b>Current difference:</b> {lag_str} s\n"
+            f"<b>Hard lag threshold:</b> {threshold:.1f} s\n\n"
+            "Stream appears to have recovered after a previous lagging condition."
+        )
+    elif reason == "post_restart_status":
+        msg = (
+            "ℹ️ <b>YOLO-DVR OCR WATCHDOG</b> ℹ️\n\n"
+            "<b>Status:</b> Post-restart status snapshot\n"
+            f"<b>Overlay time:</b> {overlay_str}\n"
+            f"<b>System time:</b>  {now_str}\n"
+            f"<b>Difference:</b> {lag_str} s\n\n"
+            "This message was sent after a recent restart to confirm that the overlay "
+            "timestamp is readable and within the expected range."
         )
     else:
         # Generic error / open_failed / read_failed / empty_roi
@@ -347,6 +372,18 @@ def load_overlay_config(path="config.ini"):
     # OCR failure escalation
     ocr_fail_threshold_count = c.getint("ocr_fail_threshold_count", fallback=3)
 
+    # Recovery alerts
+    send_recovery_alerts = c.getboolean("send_recovery_alerts", fallback=True)
+    recovery_lag_threshold_seconds = c.getfloat(
+        "recovery_lag_threshold_seconds", fallback=5.0
+    )
+
+    # Post-restart status message
+    send_post_restart_status = c.getboolean("send_post_restart_status", fallback=True)
+    post_restart_status_delay_seconds = c.getfloat(
+        "post_restart_status_delay_seconds", fallback=30.0
+    )
+
     return {
         "video_source": video_source,
         "watchdog_zone_json": watchdog_zone_json,
@@ -371,7 +408,11 @@ def load_overlay_config(path="config.ini"):
         "lag_warn_enable": lag_warn_enable,
         "lag_warn_threshold_seconds": lag_warn_threshold_seconds,
         "lag_warn_send_telegram": lag_warn_send_telegram,
-        "restart_cooldown_sec": restart_cooldown_sec,        
+        "restart_cooldown_sec": restart_cooldown_sec,
+        "send_recovery_alerts": send_recovery_alerts,
+        "recovery_lag_threshold_seconds": recovery_lag_threshold_seconds,
+        "send_post_restart_status": send_post_restart_status,
+        "post_restart_status_delay_seconds": post_restart_status_delay_seconds,                
     }
 
 def load_watchdog_roi(json_path):
@@ -559,6 +600,10 @@ def main():
     on_loop_cmd = cfg["on_loop_cmd"]
     on_error_cmd = cfg["on_error_cmd"]
     ocr_fail_threshold = cfg["ocr_fail_threshold_count"]
+    send_recovery_alerts = cfg.get("send_recovery_alerts", True)
+    recovery_lag_threshold = cfg.get("recovery_lag_threshold_seconds", 5.0)
+    send_post_restart_status = cfg.get("send_post_restart_status", True)
+    post_restart_status_delay = cfg.get("post_restart_status_delay_seconds", 30.0)
 
     logger.info("Starting overlay OCR watchdog.")
     if DRY_RUN_MODE:
@@ -572,6 +617,10 @@ def main():
     if lag_warn_enable:
         logger.info(
             f"Soft lag warning enabled, threshold={lag_warn_threshold:.1f}s"
+        )
+    if enable_realtime_lag and send_recovery_alerts:
+        logger.info(
+            f"Recovery alerts enabled; recovery_lag_threshold_seconds={recovery_lag_threshold:.1f}s"
         )
     if restart_cooldown_sec > 0:
         logger.info(f"Restart cooldown: {restart_cooldown_sec:.1f}s")
@@ -625,6 +674,9 @@ def main():
     last_alert_times: dict[str, float] = {}
     bad_ocr_count = 0  # consecutive empty or unparseable OCR results
     last_restart_mono: float | None = None  # last time we actually issued a restart
+    in_hard_lag = False  # currently in "lagging_overlay" condition
+    pending_post_restart_status = False
+    post_restart_status_due_mono: float | None = None
 
     try:
         while True:
@@ -764,6 +816,9 @@ def main():
                                 restart_requested = True
                                 run_command(on_loop_cmd, "deadloop")
                                 last_restart_mono = now_mono
+                                if send_post_restart_status and post_restart_status_delay > 0:
+                                    pending_post_restart_status = True
+                                    post_restart_status_due_mono = now_mono + post_restart_status_delay
                             else:
                                 logger.warning(
                                     "Restart suppressed due to cooldown: "
@@ -806,6 +861,9 @@ def main():
                         restart_requested = True
                         run_command(on_stuck_cmd, "frozen_overlay")
                         last_restart_mono = now_mono
+                        if send_post_restart_status and post_restart_status_delay > 0:
+                            pending_post_restart_status = True
+                            post_restart_status_due_mono = now_mono + post_restart_status_delay                        
                     else:
                         logger.warning(
                             "Restart suppressed due to cooldown: "
@@ -824,9 +882,10 @@ def main():
                 )
                 last_ts_change_mono = now_mono
 
-            # Optional: realtime lag detection
-            if enable_realtime_lag:
+            # Optional: realtime lag detection (+ recovery notification)
+            if enable_realtime_lag and max_lag > 0:
                 if lag > max_lag:
+                    # Hard lag condition
                     logger.error(
                         f"Overlay time lagging behind real time by {lag:.1f}s (> {max_lag})."
                     )
@@ -844,6 +903,9 @@ def main():
                             restart_requested = True
                             run_command(on_stuck_cmd, "lagging_overlay")
                             last_restart_mono = now_mono
+                            if send_post_restart_status and post_restart_status_delay > 0:
+                                pending_post_restart_status = True
+                                post_restart_status_due_mono = now_mono + post_restart_status_delay
                         else:
                             logger.warning(
                                 "Restart suppressed due to cooldown: "
@@ -860,6 +922,42 @@ def main():
                         last_alert_times,
                         restart_requested=restart_requested,
                     )
+                    in_hard_lag = True
+
+                else:
+                    # We're not currently above the hard-lag threshold
+                    if in_hard_lag and send_recovery_alerts:
+                        # Consider "recovered" once lag is non-negative and within recovery threshold
+                        if 0 <= lag <= recovery_lag_threshold:
+                            logger.info(
+                                f"Overlay lag back within recovery threshold: "
+                                f"{lag:.1f}s (<= {recovery_lag_threshold:.1f}s)."
+                            )
+                            maybe_send_overlay_alert(
+                                "lagging_overlay_recovered",
+                                current_ts,
+                                now_wall,
+                                lag,
+                                cfg,
+                                last_alert_times,
+                                restart_requested=False,
+                            )
+                            in_hard_lag = False
+
+            # Post-restart status snapshot (delayed)
+            if pending_post_restart_status and send_post_restart_status:
+                if post_restart_status_due_mono is not None and now_mono >= post_restart_status_due_mono:
+                    maybe_send_overlay_alert(
+                        "post_restart_status",
+                        current_ts,
+                        now_wall,
+                        lag,
+                        cfg,
+                        last_alert_times,
+                        restart_requested=False,
+                    )
+                    pending_post_restart_status = False
+                    post_restart_status_due_mono = None
 
             time.sleep(poll_interval)
 
