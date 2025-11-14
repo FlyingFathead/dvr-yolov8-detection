@@ -17,6 +17,7 @@ from pathlib import Path
 DEFAULT_VIDEO_SOURCE = "rtmp://127.0.0.1:1935/live/stream"
 DEFAULT_MASKED_ZONES_JSON = "masked_zones.json"
 DEFAULT_NAMED_ZONES_JSON = "named_zones.json"
+DEFAULT_WATCHDOG_JSON = "watchdog_zone.json"
 
 MAX_DISPLAY_WIDTH = 1280
 MAX_DISPLAY_HEIGHT = 720
@@ -57,6 +58,7 @@ def load_config():
             DEFAULT_MASKED_ZONES_JSON,
             False,
             DEFAULT_NAMED_ZONES_JSON,
+            DEFAULT_WATCHDOG_JSON,
             False
         )
 
@@ -71,6 +73,7 @@ def load_config():
             DEFAULT_MASKED_ZONES_JSON,
             False,
             DEFAULT_NAMED_ZONES_JSON,
+            DEFAULT_WATCHDOG_JSON,
             False
         )
 
@@ -79,12 +82,17 @@ def load_config():
     masked_json = config.get("region_masker", "masked_regions_output_json", fallback=DEFAULT_MASKED_ZONES_JSON)
     enable_named = config.getboolean("region_masker", "enable_zone_names", fallback=False)
     named_json = config.get("region_masker", "named_zones_output_json", fallback=DEFAULT_NAMED_ZONES_JSON)
+
+    # NEW: watchdog output JSON (used when you choose watchdog mode)
+    watchdog_json = config.get("region_masker", "watchdog_zone_output_json", fallback=DEFAULT_WATCHDOG_JSON)
+
     critical_flag = config.getboolean("region_masker", "use_critical_thresholds", fallback=False)
 
     logger.info("=== [region_masker] settings from config.ini ===")
     logger.info(f"video_source={video_source}")
     logger.info(f"enable_masked_regions={enable_masked}, masked_regions_output_json={masked_json}")
     logger.info(f"enable_zone_names={enable_named}, named_zones_output_json={named_json}")
+    logger.info(f"watchdog_zone_output_json={watchdog_json}")
     logger.info(f"use_critical_thresholds={critical_flag}")
     logger.info("===============================================")
 
@@ -95,6 +103,7 @@ def load_config():
         masked_json,
         enable_named,
         named_json,
+        watchdog_json,
         critical_flag
     )
 
@@ -141,12 +150,14 @@ def save_zones_to_json(output_json):
 
     if zone_mode == "masked":
         data_key = "masked_zones"
-    else:
+    elif zone_mode == "named":
         data_key = "named_zones"
+    else:
+        data_key = "watchdog_zones"
 
     logger.info(f"Saving {zone_mode.upper()} zones to {output_json} ...")
     with open(output_json, 'w', encoding='utf-8') as f:
-        json.dump({data_key: zones}, f, indent=4, ensure_ascii=False)  # ensure_ascii=False -> keep UTF-8
+        json.dump({data_key: zones}, f, indent=4, ensure_ascii=False)
     logger.info("Zones saved successfully.")
 
 def draw_rectangles(event, x_disp, y_disp, flags, param):
@@ -232,6 +243,7 @@ def main():
         masked_json,
         enable_named,
         named_json,
+        watchdog_json,
         critical_flag
     ) = load_config()
 
@@ -245,8 +257,9 @@ def main():
     print("Which type of zones do you want to draw?")
     print("   [1] Masked zones (with min confidence thresholds)")
     print("   [2] Named zones (with optional critical thresholds)")
+    print("   [3] Watchdog zones (fixed ROI for timestamp/OCR etc.)")
     while True:
-        choice = input("Enter 1 or 2: ").strip()
+        choice = input("Enter 1, 2 or 3: ").strip()
         if choice == "1":
             zone_mode = "masked"
             zone_output_file = masked_json
@@ -255,8 +268,12 @@ def main():
             zone_mode = "named"
             zone_output_file = named_json
             break
+        elif choice == "3":
+            zone_mode = "watchdog"
+            zone_output_file = watchdog_json
+            break
         else:
-            print("Invalid input. Please enter '1' or '2'.")
+            print("Invalid input. Please enter '1', '2' or '3'.")
 
     # Possibly load existing
     if os.path.exists(zone_output_file):
@@ -266,8 +283,10 @@ def main():
                 data = json.load(f)
             if zone_mode == "masked":
                 zones.extend(data.get("masked_zones", []))
-            else:
+            elif zone_mode == "named":
                 zones.extend(data.get("named_zones", []))
+            else:  # watchdog
+                zones.extend(data.get("watchdog_zones", []))
             logger.info(f"Loaded {len(zones)} existing zone(s).")
         except Exception as e:
             logger.error(f"Failed reading {zone_output_file}: {e}")
@@ -302,9 +321,12 @@ def main():
             if zone_mode == "masked":
                 color = (0, 0, 255)
                 prefix = "[MASKED]"
-            else:
+            elif zone_mode == "named":
                 color = (0, 255, 0)
                 prefix = "[NAMED]"
+            else:
+                color = (255, 0, 0)
+                prefix = "[WATCHDOG]"
 
             # 1) Draw existing saved rectangles
             for z in zones:
@@ -318,12 +340,15 @@ def main():
                 if zone_mode == "masked":
                     cthr = z.get("confidence_threshold", 0.0)
                     label = f"{prefix} {name} (min {cthr:.2f})"
-                else:
+                elif zone_mode == "named":
                     cval = z.get("critical_threshold", None)
                     if cval is not None:
                         label = f"{prefix} {name} (crit≥{cval:.2f})"
                     else:
                         label = f"{prefix} {name}"
+                else:
+                    # watchdog: no thresholds, just a label
+                    label = f"{prefix} {name}"
 
                 # Info label
                 label_y = y1d - 5 if (y1d - 10) > 0 else y1d + 15
