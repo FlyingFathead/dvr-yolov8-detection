@@ -119,6 +119,10 @@ def maybe_send_overlay_alert(
     if not cfg.get("send_telegram_alerts", False):
         return
 
+    # Optional separate switch for soft lag warnings
+    if reason == "lag_warning" and not cfg.get("lag_warn_send_telegram", True):
+        return
+
     interval = cfg.get("telegram_repeat_interval_sec", 60.0)
     now_mono = time.monotonic()
     last = last_alert_times.get(reason)
@@ -155,6 +159,18 @@ def maybe_send_overlay_alert(
             "The overlay time is significantly behind realtime.\n"
             "Source may be stuck, looping, or heavily delayed."
         )
+    elif reason == "lag_warning":
+        threshold = cfg.get("lag_warn_threshold_seconds", 0.0)
+        msg = (
+            "⚠️ <b>YOLO-DVR OCR WATCHDOG</b> ⚠️\n\n"
+            "<b>Reason:</b> Overlay timestamp noticeably behind realtime\n"
+            f"<b>Overlay time:</b> {overlay_str}\n"
+            f"<b>System time:</b>  {now_str}\n"
+            f"<b>Difference:</b> {lag_str} s\n"
+            f"<b>Warning threshold:</b> {threshold:.1f} s\n\n"
+            "Stream appears to be lagging significantly but has not yet crossed the "
+            "hard restart threshold."
+        )        
     elif reason == "deadloop":
         loop_thr = cfg.get("loop_reset_threshold", 0)
         msg = (
@@ -294,6 +310,13 @@ def load_overlay_config(path="config.ini"):
     enable_realtime_lag_check = c.getboolean("enable_realtime_lag_check", fallback=False)
     max_realtime_lag_seconds = c.getfloat("max_realtime_lag_seconds", fallback=120.0)
 
+    # Soft lag warning (no restart, just warns)
+    lag_warn_enable = c.getboolean("lag_warn_enable", fallback=True)
+    lag_warn_threshold_seconds = c.getfloat(
+        "lag_warn_threshold_seconds", fallback=20.0
+    )
+    lag_warn_send_telegram = c.getboolean("lag_warn_send_telegram", fallback=True)
+
     tesseract_psm = c.get("tesseract_psm", fallback="7")
     tesseract_whitelist = c.get("tesseract_whitelist", fallback="0123456789/: ")
 
@@ -340,7 +363,10 @@ def load_overlay_config(path="config.ini"):
         "ocr_fail_threshold_count": ocr_fail_threshold_count,
         "use_env_commands": use_env_commands,
         "env_command_prefix": env_cmd_prefix,
-        "send_startup_telegram": send_startup_telegram,                
+        "send_startup_telegram": send_startup_telegram,
+        "lag_warn_enable": lag_warn_enable,
+        "lag_warn_threshold_seconds": lag_warn_threshold_seconds,
+        "lag_warn_send_telegram": lag_warn_send_telegram,
     }
 
 def load_watchdog_roi(json_path):
@@ -518,6 +544,9 @@ def main():
     timestamp_format = cfg["timestamp_format"]
     enable_realtime_lag = cfg["enable_realtime_lag_check"]
     max_lag = cfg["max_realtime_lag_seconds"]
+    lag_warn_enable = cfg["lag_warn_enable"]
+    lag_warn_threshold = cfg["lag_warn_threshold_seconds"]
+    lag_warn_send_telegram = cfg["lag_warn_send_telegram"]
     tess_psm = cfg["tesseract_psm"]
     tess_whitelist = cfg["tesseract_whitelist"]
     on_stuck_cmd = cfg["on_stuck_cmd"]
@@ -534,6 +563,10 @@ def main():
     logger.info(f"Timestamp format (strptime): {timestamp_format}")
     if enable_realtime_lag:
         logger.info(f"Realtime lag check enabled, max_lag={max_lag}s")
+    if lag_warn_enable:
+        logger.info(
+            f"Soft lag warning enabled, threshold={lag_warn_threshold:.1f}s"
+        )
     logger.info(f"OCR fail threshold count: {ocr_fail_threshold}")
 
     # send startup message on Telegram if enabled
@@ -658,6 +691,23 @@ def main():
             logger.info(
                 f"Overlay time: {current_ts.strftime('%Y-%m-%d %H:%M:%S')}{lag_info}"
             )
+
+            # Soft lag warning (no restart, just warning/TG)
+            if lag > 0 and lag_warn_enable and lag > lag_warn_threshold:
+                logger.warning(
+                    f"Overlay lag {lag:.1f}s exceeds soft warning threshold "
+                    f"{lag_warn_threshold:.1f}s."
+                )
+                if lag_warn_send_telegram:
+                    maybe_send_overlay_alert(
+                        "lag_warning",
+                        current_ts,
+                        now_wall,
+                        lag,
+                        cfg,
+                        last_alert_times,
+                        restart_requested=False,
+                    )
 
             # --- deadloop / frozen time detection ---
             if last_ts is None:
