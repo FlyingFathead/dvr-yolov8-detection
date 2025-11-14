@@ -30,6 +30,12 @@ import time
 from datetime import datetime
 
 # ---------------------------------------------------------------------
+# Global switches
+# ---------------------------------------------------------------------
+# Set this to False once you're happy with behavior
+DRY_RUN_MODE = True
+
+# ---------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------
 logger = logging.getLogger("overlay_watchdog")
@@ -76,7 +82,7 @@ def layout_to_strftime(layout: str) -> str:
 
     # Hours / seconds
     s = s.replace("HH", "%H")
-    s = s.replace("hh", "%I")  # just in case
+    s = s.replace("hh", "%I")  # 12h, just in case
     s = s.replace("SS", "%S")
     s = s.replace("ss", "%S")
 
@@ -170,6 +176,10 @@ def run_command(cmd, reason):
         logger.info(f"No command configured for {reason}. Skipping.")
         return
 
+    if DRY_RUN_MODE:
+        logger.warning(f"[DRY RUN] Would execute command for {reason}: {cmd}")
+        return
+
     logger.warning(f"Executing command for {reason}: {cmd}")
     try:
         env = os.environ.copy()
@@ -186,7 +196,7 @@ def clean_ocr_text(text: str) -> str:
     # Compact version to detect date+time glued together
     compact = re.sub(r"\s+", "", text)
 
-    # Handle cases like "14/11/202518:47:22" => "14/11/2025 18:47:22"
+    # Handle cases like "14/11/202518:55:02" => "14/11/2025 18:55:02"
     m = re.match(r"(\d{2}/\d{2}/\d{4})(\d{2}:\d{2}:\d{2})$", compact)
     if m:
         return f"{m.group(1)} {m.group(2)}"
@@ -203,14 +213,14 @@ def ocr_timestamp(roi_bgr, timestamp_format, tess_psm, tess_whitelist):
     raw = pytesseract.image_to_string(bw, config=tess_cfg)
     cleaned = clean_ocr_text(raw)
 
-    # This is what you asked for: always show what Tesseract actually saw
+    # Always show what Tesseract actually saw
     logger.info(f"OCR raw='{raw.strip()}' cleaned='{cleaned}'")
 
     if not cleaned:
         return None
 
     try:
-        # Normalize spaces in both text and format so 1 vs 2 spaces don't matter
+        # Normalize spaces so 1 vs 2 spaces don't matter
         norm_text = re.sub(r"\s+", " ", cleaned)
         norm_fmt = re.sub(r"\s+", " ", timestamp_format)
         dt = datetime.strptime(norm_text, norm_fmt)
@@ -241,6 +251,8 @@ def main():
     on_error_cmd = cfg["on_error_cmd"]
 
     logger.info("Starting overlay OCR watchdog.")
+    if DRY_RUN_MODE:
+        logger.info("DRY_RUN_MODE is ENABLED – no commands will actually be executed.")
     logger.info(f"Video source: {video_source}")
     logger.info(f"ROI: x1={x1}, y1={y1}, x2={x2}, y2={y2}")
     logger.info(f"Timestamp layout (config): {layout_raw}")
