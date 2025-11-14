@@ -229,6 +229,28 @@ def ocr_timestamp(roi_bgr, timestamp_format, tess_psm, tess_whitelist):
         logger.warning(f"Failed to parse '{cleaned}' with format '{timestamp_format}': {e}")
         return None
 
+def grab_one_frame(video_source, on_error_cmd):
+    """
+    Open stream, grab one frame, close immediately.
+    This forces a fresh connection per poll.
+    """
+    cap = cv2.VideoCapture(video_source)
+    if not cap.isOpened():
+        logger.error(f"Cannot open video source: {video_source}")
+        run_command(on_error_cmd, "open_failed")
+        cap.release()
+        return None
+
+    ok, frame = cap.read()
+    if not ok or frame is None:
+        logger.error("Failed to read frame from stream.")
+        run_command(on_error_cmd, "read_failed")
+        cap.release()
+        return None
+
+    cap.release()
+    return frame
+
 # ---------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------
@@ -260,25 +282,18 @@ def main():
     if enable_realtime_lag:
         logger.info(f"Realtime lag check enabled, max_lag={max_lag}s")
 
-    cap = cv2.VideoCapture(video_source)
-    if not cap.isOpened():
-        logger.error(f"Cannot open video source: {video_source}")
-        run_command(on_error_cmd, "open_failed")
-        sys.exit(1)
-
     last_ts = None
     last_ts_change_mono = time.monotonic()
     backward_resets = 0
 
     try:
         while True:
-            ok, frame = cap.read()
             now_mono = time.monotonic()
             now_wall = datetime.now()
 
-            if not ok or frame is None:
-                logger.error("Failed to read frame from stream.")
-                run_command(on_error_cmd, "read_failed")
+            frame = grab_one_frame(video_source, on_error_cmd)
+            if frame is None:
+                # Couldn't get a frame; wait and retry
                 time.sleep(poll_interval)
                 continue
 
@@ -345,8 +360,6 @@ def main():
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user, exiting.")
-    finally:
-        cap.release()
 
 if __name__ == "__main__":
     main()
