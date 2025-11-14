@@ -35,7 +35,6 @@ from datetime import datetime
 logger = logging.getLogger("overlay_watchdog")
 logger.setLevel(logging.INFO)
 ch = logging.StreamHandler(sys.stdout)
-# Use logging's own %(asctime)s and give datefmt separately
 formatter = logging.Formatter(
     fmt="%(asctime)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
@@ -46,33 +45,42 @@ logger.addHandler(ch)
 # ---------------------------------------------------------------------
 # Helpers: timestamp layout -> strptime format
 # ---------------------------------------------------------------------
-_TOKEN_RE = re.compile(r"YYYY|YY|DD|MM|HH|hh|mm|SS|ss")
-
-_TOKEN_MAP = {
-    "YYYY": "%Y",
-    "YY": "%y",
-    "DD": "%d",
-    "MM": "%m",   # month
-    "HH": "%H",   # 24h
-    "hh": "%I",   # 12h (if ever needed)
-    "mm": "%M",   # minutes
-    "SS": "%S",
-    "ss": "%S",
-}
 
 def layout_to_strftime(layout: str) -> str:
     """
     Convert a human layout like "DD/MM/YYYY  HH:MM:SS" into a Python
     strptime format like "%d/%m/%Y  %H:%M:%S".
 
-    Only the tokens DD, MM, YYYY, YY, HH, hh, mm, SS, ss are special.
-    Everything else (slashes, spaces, colons) is left as-is.
+    Rules:
+    - DD -> %d
+    - First MM  -> %m (month)
+    - Remaining MM -> %M (minutes)
+    - YYYY -> %Y
+    - YY -> %y
+    - HH -> %H
+    - SS/ss -> %S
     """
-    def repl(match):
-        token = match.group(0)
-        return _TOKEN_MAP.get(token, token)
+    s = layout
 
-    return _TOKEN_RE.sub(repl, layout)
+    # Date part
+    s = s.replace("YYYY", "%Y")
+    s = s.replace("YY", "%y")
+    s = s.replace("DD", "%d")
+
+    # First MM we see will be "month"
+    if "MM" in s:
+        s = s.replace("MM", "%m", 1)
+
+    # Any remaining MM we treat as "minutes"
+    s = s.replace("MM", "%M")
+
+    # Hours / seconds
+    s = s.replace("HH", "%H")
+    s = s.replace("hh", "%I")  # just in case
+    s = s.replace("SS", "%S")
+    s = s.replace("ss", "%S")
+
+    return s
 
 # ---------------------------------------------------------------------
 # Config loading
@@ -106,7 +114,7 @@ def load_overlay_config(path="config.ini"):
     stuck_threshold_sec = c.getfloat("stuck_threshold_sec", fallback=20.0)
     loop_reset_threshold = c.getint("loop_reset_threshold", fallback=3)
 
-    # HERE: human layout, e.g. "DD/MM/YYYY  HH:MM:SS"
+    # Human layout, e.g. "DD/MM/YYYY  HH:MM:SS"
     layout_str = c.get("timestamp_format", fallback="DD/MM/YYYY HH:MM:SS")
     python_ts_format = layout_to_strftime(layout_str)
 
@@ -171,8 +179,18 @@ def run_command(cmd, reason):
         logger.error(f"Error running command '{cmd}': {e}")
 
 def clean_ocr_text(text: str) -> str:
+    # Strip + collapse spaces
     text = text.strip()
     text = re.sub(r"\s+", " ", text)
+
+    # Compact version to detect date+time glued together
+    compact = re.sub(r"\s+", "", text)
+
+    # Handle cases like "14/11/202518:47:22" => "14/11/2025 18:47:22"
+    m = re.match(r"(\d{2}/\d{2}/\d{4})(\d{2}:\d{2}:\d{2})$", compact)
+    if m:
+        return f"{m.group(1)} {m.group(2)}"
+
     return text
 
 def ocr_timestamp(roi_bgr, timestamp_format, tess_psm, tess_whitelist):
@@ -184,14 +202,18 @@ def ocr_timestamp(roi_bgr, timestamp_format, tess_psm, tess_whitelist):
 
     raw = pytesseract.image_to_string(bw, config=tess_cfg)
     cleaned = clean_ocr_text(raw)
-    if cleaned:
-        logger.debug(f"OCR: '{raw}' -> '{cleaned}'")
+
+    # This is what you asked for: always show what Tesseract actually saw
+    logger.info(f"OCR raw='{raw.strip()}' cleaned='{cleaned}'")
 
     if not cleaned:
         return None
 
     try:
-        dt = datetime.strptime(cleaned, timestamp_format)
+        # Normalize spaces in both text and format so 1 vs 2 spaces don't matter
+        norm_text = re.sub(r"\s+", " ", cleaned)
+        norm_fmt = re.sub(r"\s+", " ", timestamp_format)
+        dt = datetime.strptime(norm_text, norm_fmt)
         return dt
     except Exception as e:
         logger.warning(f"Failed to parse '{cleaned}' with format '{timestamp_format}': {e}")
