@@ -32,7 +32,7 @@ import subprocess
 import sys
 import time
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ---------------------------------------------------------------------
 # Global switches
@@ -40,6 +40,13 @@ from datetime import datetime
 # Set this to False once you're happy with behavior
 DRY_RUN_MODE = False
 # DRY_RUN_MODE = True
+
+# ---------------------------------------------------------------------
+# Sanity limits for overlay timestamps
+# ---------------------------------------------------------------------
+# Max absolute difference between overlay time and system time
+# If OCR produces something more than this away from now, we treat it as garbage.
+MAX_ABS_OVERLAY_SKEW_SEC = 365 * 24 * 3600  # 1 year
 
 # ---------------------------------------------------------------------
 # Logging
@@ -495,9 +502,31 @@ def ocr_timestamp(roi_bgr, timestamp_format, tess_psm, tess_whitelist):
         norm_text = re.sub(r"\s+", " ", cleaned)
         norm_fmt = re.sub(r"\s+", " ", timestamp_format)
         dt = datetime.strptime(norm_text, norm_fmt)
+
+        # --- SANITY CHECK vs system time ---
+        now_wall = datetime.now()
+        skew = (dt - now_wall).total_seconds()
+
+        # If overlay is absurdly far from current time, treat as garbage OCR.
+        if abs(skew) > MAX_ABS_OVERLAY_SKEW_SEC:
+            logger.warning(
+                "Discarding insane overlay timestamp %s (skew %.1fs vs now %s) from OCR cleaned='%s'",
+                dt.strftime("%Y-%m-%d %H:%M:%S"),
+                skew,
+                now_wall.strftime("%Y-%m-%d %H:%M:%S"),
+                cleaned,
+            )
+            return None, cleaned
+
         return dt, cleaned
+
     except Exception as e:
-        logger.warning(f"Failed to parse '{cleaned}' with format '{timestamp_format}': {e}")
+        logger.warning(
+            "Failed to parse '%s' with format '%s': %s",
+            cleaned,
+            timestamp_format,
+            e,
+        )
         return None, cleaned
 
 def grab_one_frame(video_source, on_error_cmd):
