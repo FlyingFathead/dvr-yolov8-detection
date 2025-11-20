@@ -710,9 +710,13 @@ def main():
     try:
         while True:
             now_mono = time.monotonic()
+
+            # MOVED: grab frame BEFORE checking system time to remove connection latency
+            frame = grab_one_frame(video_source, on_error_cmd)
+            
+            # MOVED: get system time immediately after frame is available
             now_wall = datetime.now()
 
-            frame = grab_one_frame(video_source, on_error_cmd)
             if frame is None:
                 # Couldn't get a frame; wait and retry
                 time.sleep(poll_interval)
@@ -845,6 +849,12 @@ def main():
                                 restart_requested = True
                                 run_command(on_loop_cmd, "deadloop")
                                 last_restart_mono = now_mono
+                                
+                                # --- FIX: BRAIN WIPE ---
+                                last_ts = None
+                                backward_resets = 0
+                                # -----------------------
+
                                 if send_post_restart_status and post_restart_status_delay > 0:
                                     pending_post_restart_status = True
                                     post_restart_status_due_mono = now_mono + post_restart_status_delay
@@ -854,6 +864,8 @@ def main():
                                     f"{elapsed:.1f}s since last restart "
                                     f"(< {restart_cooldown_sec:.1f}s)."
                                 )
+                                # Reset backward count anyway to avoid spamming every poll
+                                backward_resets = 0
 
                         maybe_send_overlay_alert(
                             "deadloop",
@@ -864,8 +876,7 @@ def main():
                             last_alert_times,
                             restart_requested=restart_requested,
                         )
-                        backward_resets = 0
-                    # do not update last_ts/last_ts_change_mono
+                        # do not update last_ts/last_ts_change_mono
                 else:
                     # same as last time; handled by "stuck" logic
                     pass
@@ -890,6 +901,12 @@ def main():
                         restart_requested = True
                         run_command(on_stuck_cmd, "frozen_overlay")
                         last_restart_mono = now_mono
+                        
+                        # --- FIX: BRAIN WIPE ---
+                        last_ts = None
+                        backward_resets = 0
+                        # -----------------------
+
                         if send_post_restart_status and post_restart_status_delay > 0:
                             pending_post_restart_status = True
                             post_restart_status_due_mono = now_mono + post_restart_status_delay                        
@@ -932,6 +949,12 @@ def main():
                             restart_requested = True
                             run_command(on_stuck_cmd, "lagging_overlay")
                             last_restart_mono = now_mono
+
+                            # --- FIX: BRAIN WIPE ---
+                            last_ts = None
+                            backward_resets = 0
+                            # -----------------------
+
                             if send_post_restart_status and post_restart_status_delay > 0:
                                 pending_post_restart_status = True
                                 post_restart_status_due_mono = now_mono + post_restart_status_delay
