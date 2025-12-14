@@ -490,24 +490,34 @@ def ocr_timestamp(roi_bgr, timestamp_format, tess_psm, tess_whitelist):
     cleaned = clean_ocr_text(raw)
 
     if not cleaned:
-        # Empty OCR is definitely suspicious
         logger.warning(f"OCR timestamp EMPTY. raw='{raw.strip()}' cleaned='{cleaned}'")
         return None, cleaned
 
-    # Normal OCR log for analysis
     logger.info(f"OCR raw='{raw.strip()}' cleaned='{cleaned}'")
 
     try:
         # Normalize spaces so 1 vs 2 spaces don't matter
-        norm_text = re.sub(r"\s+", " ", cleaned)
-        norm_fmt = re.sub(r"\s+", " ", timestamp_format)
+        norm_text = re.sub(r"\s+", " ", cleaned).strip()
+        norm_fmt  = re.sub(r"\s+", " ", timestamp_format).strip()
+
+        # ---- NEW: strict shape gate (prevents '4/12/2025 ...' from being accepted) ----
+        # Your overlay is DD/MM/YYYY (2-digit day/month). If OCR loses the leading '1'
+        # (e.g. '4/12/2025'), we reject it as garbage OCR instead of parsing it.
+        strict_re = re.compile(r"^\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2}$")
+        if not strict_re.match(norm_text):
+            logger.warning(
+                "Rejecting non-strict timestamp OCR: cleaned='%s' norm='%s'",
+                cleaned, norm_text
+            )
+            return None, cleaned
+        # ---------------------------------------------------------------------------
+
         dt = datetime.strptime(norm_text, norm_fmt)
 
         # --- SANITY CHECK vs system time ---
         now_wall = datetime.now()
         skew = (dt - now_wall).total_seconds()
 
-        # If overlay is absurdly far from current time, treat as garbage OCR.
         if abs(skew) > MAX_ABS_OVERLAY_SKEW_SEC:
             logger.warning(
                 "Discarding insane overlay timestamp %s (skew %.1fs vs now %s) from OCR cleaned='%s'",
