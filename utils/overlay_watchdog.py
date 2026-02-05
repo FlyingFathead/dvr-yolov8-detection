@@ -394,6 +394,9 @@ def load_overlay_config(path="config.ini"):
     # debug options for ROI
     debug_dump_roi = c.getboolean("debug_dump_roi", fallback=False)
     debug_output_dir = c.get("debug_output_dir", fallback="./debug/").strip()
+    # Debug: always write the most recent ROI to a single file (overwritten)
+    debug_write_latest_roi = c.getboolean("debug_write_latest_roi", fallback=False)
+    debug_latest_filename = c.get("debug_latest_filename", fallback="roi_latest.png").strip()
 
     return {
         "video_source": video_source,
@@ -426,7 +429,31 @@ def load_overlay_config(path="config.ini"):
         "post_restart_status_delay_seconds": post_restart_status_delay_seconds,
         "debug_dump_roi": debug_dump_roi,
         "debug_output_dir": debug_output_dir,
+        "debug_write_latest_roi": debug_write_latest_roi,
+        "debug_latest_filename": debug_latest_filename,
     }
+
+# ---------------------------------------------------------------------
+# DEBUG TOOLS
+# ---------------------------------------------------------------------
+# write the latest ROI
+def write_latest_roi_png(roi_bgr, out_dir: str, filename: str = "roi_latest.png"):
+    os.makedirs(out_dir, exist_ok=True)
+
+    final_path = os.path.join(out_dir, filename)
+    base, ext = os.path.splitext(final_path)
+    if not ext:
+        final_path += ".png"
+        base, ext = os.path.splitext(final_path)
+
+    tmp_path = f"{base}.tmp{ext}"  # keep .png so cv2 picks the encoder
+
+    ok = cv2.imwrite(tmp_path, roi_bgr)
+    if not ok:
+        logger.error(f"DEBUG: failed to write latest ROI PNG: {tmp_path}")
+        return
+
+    os.replace(tmp_path, final_path)  # atomic overwrite on same filesystem
 
 # dump the ROI upon debug as a PNG
 def dump_roi_png(roi_bgr, tag: str, now_wall: datetime, out_dir: str):
@@ -661,6 +688,8 @@ def main():
     # // debug
     debug_dump_roi = cfg.get("debug_dump_roi", False)
     debug_output_dir = cfg.get("debug_output_dir", "./debug/")
+    debug_write_latest_roi = cfg.get("debug_write_latest_roi", False)
+    debug_latest_filename = cfg.get("debug_latest_filename", "roi_latest.png")
 
     logger.info("Starting overlay OCR watchdog.")
     if DRY_RUN_MODE:
@@ -684,6 +713,13 @@ def main():
     else:
         logger.info("Restart cooldown disabled (restart_cooldown_sec <= 0)")
     logger.info(f"OCR fail threshold count: {ocr_fail_threshold}")
+
+    # write latest ROI into debug if enabled
+    if debug_write_latest_roi:
+        logger.warning(
+            f"DEBUG: latest ROI will be overwritten at "
+            f"{os.path.join(debug_output_dir, debug_latest_filename)}"
+        )
 
     # send startup message on Telegram if enabled
     send_startup_telegram_if_enabled(
@@ -769,6 +805,9 @@ def main():
             current_ts, cleaned_text = ocr_timestamp(
                 roi, timestamp_format, tess_psm, tess_whitelist
             )
+
+            if debug_write_latest_roi:
+                write_latest_roi_png(roi, debug_output_dir, debug_latest_filename)
 
             # Handle OCR failures: empty or unparseable
             if not cleaned_text:
