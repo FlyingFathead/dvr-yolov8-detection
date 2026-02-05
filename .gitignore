@@ -33,6 +33,8 @@ logs/**
 # debug dumps (ROI PNGs etc)
 debug/
 debug/**
+roi_latest*.png
+roi_unparseable*.png
 
 # region data
 ignore_zones.json
