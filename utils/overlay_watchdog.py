@@ -391,6 +391,10 @@ def load_overlay_config(path="config.ini"):
         "post_restart_status_delay_seconds", fallback=30.0
     )
 
+    # debug options for ROI
+    debug_dump_roi = c.getboolean("debug_dump_roi", fallback=False)
+    debug_output_dir = c.get("debug_output_dir", fallback="./debug/").strip()
+
     return {
         "video_source": video_source,
         "watchdog_zone_json": watchdog_zone_json,
@@ -419,8 +423,18 @@ def load_overlay_config(path="config.ini"):
         "send_recovery_alerts": send_recovery_alerts,
         "recovery_lag_threshold_seconds": recovery_lag_threshold_seconds,
         "send_post_restart_status": send_post_restart_status,
-        "post_restart_status_delay_seconds": post_restart_status_delay_seconds,                
+        "post_restart_status_delay_seconds": post_restart_status_delay_seconds,
+        "debug_dump_roi": debug_dump_roi,
+        "debug_output_dir": debug_output_dir,
     }
+
+# dump the ROI upon debug as a PNG
+def dump_roi_png(roi_bgr, tag: str, now_wall: datetime, out_dir: str):
+    os.makedirs(out_dir, exist_ok=True)
+    ts = now_wall.strftime("%Y%m%d_%H%M%S")
+    path = os.path.join(out_dir, f"roi_{tag}_{ts}_{time.time_ns()}.png")
+    cv2.imwrite(path, roi_bgr)
+    logger.warning(f"DEBUG: wrote ROI dump: {path}")
 
 def load_watchdog_roi(json_path):
     if not os.path.exists(json_path):
@@ -644,6 +658,10 @@ def main():
     send_post_restart_status = cfg.get("send_post_restart_status", True)
     post_restart_status_delay = cfg.get("post_restart_status_delay_seconds", 30.0)
 
+    # // debug
+    debug_dump_roi = cfg.get("debug_dump_roi", False)
+    debug_output_dir = cfg.get("debug_output_dir", "./debug/")
+
     logger.info("Starting overlay OCR watchdog.")
     if DRY_RUN_MODE:
         logger.info("DRY_RUN_MODE is ENABLED – no commands will actually be executed.")
@@ -756,6 +774,8 @@ def main():
             if not cleaned_text:
                 bad_ocr_count += 1
                 logger.warning(f"OCR empty ({bad_ocr_count} consecutive)")
+                if debug_dump_roi:
+                    dump_roi_png(roi, "empty", now_wall, debug_output_dir)
                 if bad_ocr_count >= ocr_fail_threshold:
                     maybe_send_overlay_alert(
                         "empty_overlay", None, now_wall, None, cfg, last_alert_times
@@ -766,6 +786,8 @@ def main():
             if current_ts is None:
                 bad_ocr_count += 1
                 logger.warning(f"OCR unparseable ({bad_ocr_count} consecutive)")
+                if debug_dump_roi:
+                    dump_roi_png(roi, "unparseable", now_wall, debug_output_dir)
                 if bad_ocr_count >= ocr_fail_threshold:
                     maybe_send_overlay_alert(
                         "unparseable_overlay", None, now_wall, None, cfg, last_alert_times

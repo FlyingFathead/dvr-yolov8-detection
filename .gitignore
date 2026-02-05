@@ -30,6 +30,10 @@ yolo_detections/**
 logs/
 logs/**
 
+# debug dumps (ROI PNGs etc)
+debug/
+debug/**
+
 # region data
 ignore_zones.json
 data/
