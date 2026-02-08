@@ -286,6 +286,17 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **0.163**
+  - Overlapping ROI's can now be configured in `config.ini` to have different types of properties when processed:
+  ```
+  ; How to handle overlapping masked zones when a detection intersects multiple zones
+  ; Options:
+  ;   first      = current behavior (first zone in JSON that fails wins)
+  ;   strictest  = require max(conf_threshold) across all intersecting zones
+  ;   lenient    = require min(conf_threshold) across all intersecting zones (usually dumb)
+  ;   priority   = use per-zone "priority" field (higher wins), tie-break by strictest
+  # (tip: legacy ROI overlap behavior = first)
+  ```  
 - **0.1626**
   - Created a separate ROI watchdog module that can be used for various uses, including delay compensation and lag warnings from on-stream data, Telegram alerts and auto-restarts when needed
   - (See: `utils/overlay_watchdog.py`)

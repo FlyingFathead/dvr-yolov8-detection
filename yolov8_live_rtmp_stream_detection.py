@@ -109,6 +109,9 @@ print("Starting configuration loading...", flush=True)
 config = load_config()
 print("Configuration loading completed.", flush=True)
 
+# When the user wants to exit
+HEADLESS = False  # Initialize globally
+
 # Assign configurations to variables
 HEADLESS = config.getboolean('detection', 'headless', fallback=False)
 DEFAULT_CONF_THRESHOLD = config.getfloat('general', 'default_conf_threshold')
@@ -152,12 +155,15 @@ CREATE_DATE_SUBDIRS = config.getboolean('detection', 'create_date_subdirs', fall
 ENABLE_WEBSERVER = config.getboolean('webserver', 'enable_webserver', fallback=False)
 WEBSERVER_HOST = config.get('webserver', 'webserver_host', fallback='0.0.0.0')
 WEBSERVER_PORT = config.getint('webserver', 'webserver_port', fallback=5000)
+# Policy for overlapping ROI's
+MASKED_OVERLAP_POLICY = config.get(
+    "region_masker", "masked_overlap_policy", fallback="first"
+).strip().lower()
 # Read AGGREGATED_DETECTIONS_FILE from config for remote sync
 ENABLE_PERSISTENT_AGGREGATED_DETECTIONS = config.getboolean('aggregation', 'enable_persistent_aggregated_detections', fallback=False)
 AGGREGATED_DETECTIONS_FILE = config.get('aggregation', 'aggregated_detections_file', fallback='./logs/aggregated_detections.json')
 # max number of aggregation entries to show on webUI
 webui_max_aggregation_entries = 100
-
 # Initialize the image save queue and stop event
 # image_save_queue = Queue()
 image_save_queue = Queue(maxsize=IMAGE_SAVE_QUEUE_MAXSIZE)
@@ -319,31 +325,75 @@ def load_masked_regions(config, main_logger):
         main_logger.error(f"Failed to parse masked regions JSON '{masked_json_path}': {e}")
         main_logger.info("Continuing with no masked regions loaded.")
 
-# masked regions
-def apply_masked_regions(x1, y1, x2, y2, confidence, masked_regions):
-    """
-    Example logic: if detection box intersects a masked region,
-    then either ignore it or require a higher confidence threshold.
-    This is TOTALLY up to you how you interpret it.
-
-    Returns (keep_detection_bool, skip_info_dict|None).
-    skip_info_dict has keys like {"zone_name": str, "required_conf": float} if skipping.
-    """
+# masked regions; with new policy considering ROI priority
+def apply_masked_regions(x1, y1, x2, y2, confidence, masked_regions, policy="first"):
+    hits = []
     for zone in masked_regions:
         zx1 = zone.get("x1", 0)
         zy1 = zone.get("y1", 0)
         zx2 = zone.get("x2", 0)
         zy2 = zone.get("y2", 0)
+
         if boxes_intersect(x1, y1, x2, y2, zx1, zy1, zx2, zy2):
-            zone_name = zone.get("name", "UnknownZone")
-            required_conf = zone.get("confidence_threshold", 1.0)
-            # If detection's conf < the zone's threshold => skip
-            if confidence < required_conf:
-                return (False, {
-                    "zone_name": zone_name,
-                    "required_conf": required_conf
-                })
+            hits.append({
+                "name": zone.get("name", "UnknownZone"),
+                "thr": float(zone.get("confidence_threshold", 1.0)),
+                "priority": int(zone.get("priority", 0)),
+            })
+
+    if not hits:
+        return (True, None)
+
+    if policy == "first":
+        # Preserve old behavior: first failing zone (by JSON order) wins
+        for h in hits:
+            if confidence < h["thr"]:
+                return (False, {"zone_name": h["name"], "required_conf": h["thr"]})
+        return (True, None)
+
+    if policy == "strictest":
+        required_conf = max(h["thr"] for h in hits)
+    elif policy == "lenient":
+        required_conf = min(h["thr"] for h in hits)
+    elif policy == "priority":
+        maxp = max(h["priority"] for h in hits)
+        top = [h for h in hits if h["priority"] == maxp]
+        required_conf = max(h["thr"] for h in top)
+    else:
+        # Unknown policy -- fail safe
+        required_conf = max(h["thr"] for h in hits)
+
+    if confidence < required_conf:
+        offenders = [h["name"] for h in hits if h["thr"] == required_conf]
+        return (False, {"zone_name": ",".join(offenders), "required_conf": required_conf})
+
     return (True, None)
+
+# # // OLD method // masked regions
+# def apply_masked_regions(x1, y1, x2, y2, confidence, masked_regions):
+#     """
+#     Example logic: if detection box intersects a masked region,
+#     then either ignore it or require a higher confidence threshold.
+#     This is TOTALLY up to you how you interpret it.
+
+#     Returns (keep_detection_bool, skip_info_dict|None).
+#     skip_info_dict has keys like {"zone_name": str, "required_conf": float} if skipping.
+#     """
+#     for zone in masked_regions:
+#         zx1 = zone.get("x1", 0)
+#         zy1 = zone.get("y1", 0)
+#         zx2 = zone.get("x2", 0)
+#         zy2 = zone.get("y2", 0)
+#         if boxes_intersect(x1, y1, x2, y2, zx1, zy1, zx2, zy2):
+#             zone_name = zone.get("name", "UnknownZone")
+#             required_conf = zone.get("confidence_threshold", 1.0)
+#             # If detection's conf < the zone's threshold => skip
+#             if confidence < required_conf:
+#                 return (False, {
+#                     "zone_name": zone_name,
+#                     "required_conf": required_conf
+#                 })
+#     return (True, None)
 
     # for zone in masked_regions:
     #     # Parse region coords
@@ -539,8 +589,8 @@ def load_model(model_variant=DEFAULT_MODEL_VARIANT):
         logging.error(f"Error loading model {model_variant}: {e}")
         raise
 
-# Initialize model
-model = load_model(DEFAULT_MODEL_VARIANT)
+# Initialize model // NOT used here
+# model = load_model(DEFAULT_MODEL_VARIANT)
 
 # Get available CUDA GPU and its details
 def log_cuda_info():
@@ -913,11 +963,14 @@ def frame_processing_thread(
 
                     # 5A) Check masked regions logic:
                     if masked_regions:
+
                         keep_detection, skip_info = apply_masked_regions(
                             int(x1), int(y1), int(x2), int(y2),
                             float(confidence),
-                            masked_regions
+                            masked_regions,
+                            policy=MASKED_OVERLAP_POLICY
                         )
+
                         if not keep_detection:
                             zone_name = skip_info.get("zone_name", "UnknownZone")
                             required_conf = skip_info.get("required_conf", 1.0)
@@ -1100,9 +1153,6 @@ def frame_processing_thread(
         tts_stop_event.set()
         if not headless:
             cv2.destroyAllWindows()
-
-# When the user wants to exit
-HEADLESS = False  # Initialize globally
 
 # Define the image-saving thread function
 def image_saving_thread_function(image_save_queue, stop_event):
@@ -1492,6 +1542,28 @@ if __name__ == "__main__":
     main_logger.info(f"Image quality: {IMAGE_QUALITY}")
     main_logger.info(f"PNG compression level is set to: {PNG_COMPRESSION_LEVEL}")    
     main_logger.info(f"WebP lossless compression is {'enabled' if WEBP_LOSSLESS else 'disabled'}")
+
+    # --- ROI overlap policy startup info ---
+    _roi_pol = (MASKED_OVERLAP_POLICY or "first").strip().lower()
+    _roi_known = {"first", "strictest", "lenient", "priority"}
+
+    if _roi_pol not in _roi_known:
+        main_logger.warning(
+            f"masked_overlap_policy is set to '{MASKED_OVERLAP_POLICY}' (unknown). "
+            "Will behave fail-safe (strictest threshold)."
+        )
+    else:
+        main_logger.info(f"Masked ROI overlap policy: '{_roi_pol}'")
+
+    # Optional: also print a one-liner description so you don’t need to remember semantics
+    if _roi_pol == "first":
+        main_logger.info("ROI policy detail: legacy JSON order; first failing intersecting ROI decides.")
+    elif _roi_pol == "strictest":
+        main_logger.info("ROI policy detail: overlap => require the highest threshold among intersecting ROIs.")
+    elif _roi_pol == "lenient":
+        main_logger.info("ROI policy detail: overlap => require the lowest threshold among intersecting ROIs.")
+    elif _roi_pol == "priority":
+        main_logger.info("ROI policy detail: overlap => pick highest 'priority' ROI(s); if tie, use strictest among them.")
 
     hls_proc = run_hls_relay_if_enabled(config)
 
