@@ -73,6 +73,185 @@ def parse_canvas(s: str):
     return w, h
 
 
+def _evenize(n: int) -> int:
+    return n if (n % 2 == 0) else (n + 1)
+
+
+# --- Image size parsing (stdlib-only) ----------------------------------------
+
+def _png_size(path: str):
+    with open(path, "rb") as f:
+        sig = f.read(8)
+        if sig != b"\x89PNG\r\n\x1a\n":
+            return None
+        # PNG: after signature, first chunk should be IHDR
+        _len = f.read(4)
+        ctype = f.read(4)
+        if ctype != b"IHDR":
+            return None
+        w = int.from_bytes(f.read(4), "big")
+        h = int.from_bytes(f.read(4), "big")
+        if w > 0 and h > 0:
+            return w, h
+    return None
+
+
+def _jpeg_size(path: str):
+    # Parse JPEG SOF marker for width/height
+    with open(path, "rb") as f:
+        if f.read(2) != b"\xFF\xD8":
+            return None
+
+        def _read1():
+            b = f.read(1)
+            return b[0] if b else None
+
+        while True:
+            b = _read1()
+            if b is None:
+                return None
+            if b != 0xFF:
+                continue
+
+            # skip fill 0xFF bytes
+            marker = _read1()
+            while marker == 0xFF:
+                marker = _read1()
+            if marker is None:
+                return None
+
+            # stand-alone markers
+            if marker in (0xD8, 0xD9):  # SOI/EOI
+                continue
+
+            # read segment length
+            seglen_bytes = f.read(2)
+            if len(seglen_bytes) != 2:
+                return None
+            seglen = int.from_bytes(seglen_bytes, "big")
+            if seglen < 2:
+                return None
+
+            # SOF markers that contain size
+            if marker in (
+                0xC0, 0xC1, 0xC2, 0xC3,
+                0xC5, 0xC6, 0xC7,
+                0xC9, 0xCA, 0xCB,
+                0xCD, 0xCE, 0xCF
+            ):
+                # precision (1), height (2), width (2)
+                data = f.read(5)
+                if len(data) != 5:
+                    return None
+                h = int.from_bytes(data[1:3], "big")
+                w = int.from_bytes(data[3:5], "big")
+                if w > 0 and h > 0:
+                    return w, h
+                return None
+
+            # skip segment payload (we already consumed 2 length bytes)
+            f.seek(seglen - 2, os.SEEK_CUR)
+
+
+def _webp_size(path: str):
+    # WebP RIFF container: VP8 / VP8L / VP8X
+    with open(path, "rb") as f:
+        hdr = f.read(30)
+        if len(hdr) < 16:
+            return None
+        if hdr[0:4] != b"RIFF" or hdr[8:12] != b"WEBP":
+            return None
+
+        chunk = hdr[12:16]
+        # chunk size at 16:20, data starts at 20
+        # We may need more bytes depending on chunk type
+        f.seek(12)
+        riff = f.read(4096)  # enough for headers in practice
+        if len(riff) < 32:
+            return None
+
+        chunk = riff[12:16]
+        if chunk == b"VP8X":
+            # Extended WebP: width-1 at bytes 24..26, height-1 at 27..29
+            if len(riff) < 30:
+                return None
+            w = 1 + (riff[24] | (riff[25] << 8) | (riff[26] << 16))
+            h = 1 + (riff[27] | (riff[28] << 8) | (riff[29] << 16))
+            return (w, h) if (w > 0 and h > 0) else None
+
+        if chunk == b"VP8L":
+            # Lossless WebP: signature 0x2f then 4 bytes with packed dims
+            # data begins at 20; signature at 20
+            if len(riff) < 25:
+                return None
+            if riff[20] != 0x2F:
+                return None
+            bits = int.from_bytes(riff[21:25], "little")
+            w = 1 + (bits & 0x3FFF)
+            h = 1 + ((bits >> 14) & 0x3FFF)
+            return (w, h) if (w > 0 and h > 0) else None
+
+        if chunk == b"VP8 ":
+            # Lossy VP8: frame tag(3), start code(3) at data[3:6] == 0x9d 0x01 0x2a
+            # then 2 bytes width, 2 bytes height with scaling bits
+            if len(riff) < 30:
+                return None
+            data = riff[20:]  # chunk data start
+            if len(data) < 10:
+                return None
+            if data[3:6] != b"\x9d\x01\x2a":
+                return None
+            w = data[6] | ((data[7] & 0x3F) << 8)
+            h = data[8] | ((data[9] & 0x3F) << 8)
+            return (w, h) if (w > 0 and h > 0) else None
+
+    return None
+
+
+def image_size(path: str):
+    ext = os.path.splitext(path)[1].lower()
+    try:
+        if ext == ".png":
+            return _png_size(path)
+        if ext in (".jpg", ".jpeg"):
+            return _jpeg_size(path)
+        if ext == ".webp":
+            return _webp_size(path)
+    except Exception:
+        return None
+    return None
+
+
+def choose_canvas_from_frames(frames_dir: str, fallback_canvas: str):
+    """
+    Find the largest downloaded frame by pixel area and return its WxH (evenized).
+    If parsing fails for all frames, return fallback_canvas.
+    Returns: (canvas_str, chosen_file_or_none)
+    """
+    files = sorted([f for f in os.listdir(frames_dir) if f.startswith("frame_")])
+    best = None  # (area, w, h, filename)
+
+    for fn in files:
+        p = os.path.join(frames_dir, fn)
+        sz = image_size(p)
+        if not sz:
+            continue
+        w, h = sz
+        area = w * h
+        if best is None or area > best[0]:
+            best = (area, w, h, fn)
+
+    if not best:
+        return fallback_canvas, None
+
+    _, w, h, fn = best
+    w = _evenize(w)
+    h = _evenize(h)
+    return f"{w}x{h}", fn
+
+
+# --- Timestamp parsing --------------------------------------------------------
+
 def parse_dt(s: str) -> datetime:
     """
     Returns a naive datetime in UTC-ish terms (aware -> UTC -> drop tzinfo).
@@ -86,7 +265,6 @@ def parse_dt(s: str) -> datetime:
     if not s:
         raise ValueError("empty timestamp")
 
-    # Try RFC 2822 / HTTP-date
     try:
         dt = parsedate_to_datetime(s)
         if dt is not None:
@@ -96,7 +274,6 @@ def parse_dt(s: str) -> datetime:
     except Exception:
         pass
 
-    # Trim common trailing Z / offsets for naive parsing
     s2 = re.sub(r"(Z|[+-]\d{2}:\d{2})$", "", s)
 
     for fmt in DT_FORMATS:
@@ -115,10 +292,6 @@ def parse_dt(s: str) -> datetime:
 
 
 def parse_first_latest_from_item(item: dict):
-    """
-    Returns (first_dt, latest_dt) as datetimes.
-    Tries first_timestamp/latest_timestamp; if those fail, tries summary field.
-    """
     first_raw = item.get("first_timestamp", "")
     latest_raw = item.get("latest_timestamp", "")
 
@@ -146,6 +319,8 @@ def pick_filename(entry: dict, prefer: str):
     return entry.get("full_frame") or entry.get("detection_area")
 
 
+# --- ffmpeg render ------------------------------------------------------------
+
 def run_ffmpeg_concat(frames_dir: str, out_path: str, fps: float, canvas: str):
     ensure_ffmpeg_or_exit()
 
@@ -168,7 +343,7 @@ def run_ffmpeg_concat(frames_dir: str, out_path: str, fps: float, canvas: str):
         fp.write(f"file {files[-1]}\n")
         fp.write(f"file {files[-1]}\n")
 
-    # Normalize variable-size crops to a fixed canvas with scale+pad.
+    # Fit-to-screen behavior: keep aspect ratio, no stretch; pad to canvas.
     vf = (
         f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
         f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
@@ -189,6 +364,8 @@ def run_ffmpeg_concat(frames_dir: str, out_path: str, fps: float, canvas: str):
     ]
     subprocess.check_call(cmd)
 
+
+# --- Listing helpers ----------------------------------------------------------
 
 def build_index_rows(detections, server_day, today_only: bool, finalized_only: bool):
     rows = []
@@ -248,14 +425,9 @@ def print_index(rows, limit: int, as_json: bool):
         print(f"{latest_s:19}  {first_s:19}  {str(count):>5}  {flag:>3}  {uuid_str}")
 
 
+# --- Path resolution ----------------------------------------------------------
+
 def resolve_out_path(project_root: str, uuid_str: str, out_arg: str | None) -> str:
-    """
-    Rule you asked for:
-      - default output always goes under <project_root>/data/
-      - if --out is relative, it is also treated as relative to <project_root>/data/
-      - if --out is absolute, we respect it
-      - if --out points to a directory, we drop <uuid>_out.mp4 inside it
-    """
     ddir = data_dir(project_root)
     os.makedirs(ddir, exist_ok=True)
 
@@ -266,15 +438,12 @@ def resolve_out_path(project_root: str, uuid_str: str, out_arg: str | None) -> s
 
     out_arg = os.path.expanduser(out_arg)
 
-    # Absolute path: respect it
     if os.path.isabs(out_arg):
         if os.path.isdir(out_arg):
             return os.path.abspath(os.path.join(out_arg, default_name))
         os.makedirs(os.path.dirname(out_arg) or ".", exist_ok=True)
         return os.path.abspath(out_arg)
 
-    # Relative path: treat relative to data/
-    # Special case: user already prefixes "data/..." -> treat relative to project root
     if out_arg == "data" or out_arg.startswith("data" + os.sep):
         p = os.path.join(project_root, out_arg)
     else:
@@ -289,11 +458,6 @@ def resolve_out_path(project_root: str, uuid_str: str, out_arg: str | None) -> s
 
 
 def resolve_frames_dir(project_root: str, uuid_str: str, workdir_arg: str | None) -> str:
-    """
-    Default frames dir goes under <project_root>/data/frames_<uuid>
-    If --workdir is relative, treat it as relative to <project_root>/data/
-    If --workdir is absolute, respect it.
-    """
     ddir = data_dir(project_root)
     os.makedirs(ddir, exist_ok=True)
 
@@ -308,7 +472,6 @@ def resolve_frames_dir(project_root: str, uuid_str: str, workdir_arg: str | None
         os.makedirs(workdir_arg, exist_ok=True)
         return os.path.abspath(workdir_arg)
 
-    # Relative -> data/
     p = os.path.join(ddir, workdir_arg)
     os.makedirs(p, exist_ok=True)
     return os.path.abspath(p)
@@ -317,6 +480,7 @@ def resolve_frames_dir(project_root: str, uuid_str: str, workdir_arg: str | None
 def main():
     argv = sys.argv[1:]
     base_url_given = any(a == "--base-url" or a.startswith("--base-url=") for a in argv)
+    canvas_given = any(a == "--canvas" or a.startswith("--canvas=") for a in argv)
     help_requested = ("-h" in argv) or ("--help" in argv)
 
     ap = argparse.ArgumentParser(
@@ -333,7 +497,7 @@ def main():
     ap.add_argument(
         "--limit",
         type=int,
-        default=0,  # default ALL for today
+        default=0,
         help="Max rows to print in --list mode. Default 0 = all. (Use e.g. 30 to limit output.)",
     )
     ap.add_argument("--all-days", action="store_true", help="In --list mode, show batches across all days.")
@@ -342,11 +506,23 @@ def main():
     ap.add_argument("--uuid", default=None, help="If set, use this batch UUID directly (skips today-filter).")
     ap.add_argument("--prefer", choices=["detection_area", "full_frame"], default="detection_area")
     ap.add_argument("--fps", type=float, default=8.0)
+
     ap.add_argument(
         "--canvas",
         default=CANVAS_DEFAULT,
-        help=f'Output canvas WxH for video (default "{CANVAS_DEFAULT}"). Example: "640x360".',
+        help=f'Output canvas WxH for video (default "{CANVAS_DEFAULT}"). '
+             f'NOTE: if you do not specify --canvas, and fit-largest is enabled, the canvas will be auto-selected.',
     )
+
+    # DEFAULT ON: auto-pick canvas from largest downloaded frame (unless --canvas explicitly provided)
+    ap.add_argument(
+        "--no-fit-largest",
+        action="store_false",
+        dest="fit_largest",
+        help='Disable auto "fit-to-screen" canvas selection (largest frame).',
+    )
+    ap.set_defaults(fit_largest=True)
+
     ap.add_argument(
         "--finalized-only",
         action="store_true",
@@ -372,8 +548,7 @@ def main():
     base = args.base_url.rstrip("/")
 
     project_root = project_root_from_utils()
-    ddir = data_dir(project_root)
-    os.makedirs(ddir, exist_ok=True)
+    os.makedirs(data_dir(project_root), exist_ok=True)
 
     server_time = http_get_json(f"{base}/api/current_time").get("current_time")
     if not server_time:
@@ -467,7 +642,8 @@ def main():
         "uuid": uuid_str,
         "prefer": args.prefer,
         "fps": args.fps,
-        "canvas": args.canvas,
+        "canvas": args.canvas,  # will be overwritten by auto-canvas if enabled
+        "fit_largest": bool(args.fit_largest),
         "picked": {
             "count": count,
             "first_timestamp": first_ts,
@@ -509,13 +685,30 @@ def main():
     if saved < 2:
         raise RuntimeError(f"Downloaded only {saved} frames -- not enough to make a video.")
 
+    # Auto "fit-to-screen" canvas selection:
+    # - default ON (--no-fit-largest disables)
+    # - only if user did NOT explicitly set --canvas
+    effective_canvas = args.canvas
+    if args.fit_largest and (not canvas_given):
+        auto_canvas, chosen_frame = choose_canvas_from_frames(frames_dir, fallback_canvas=args.canvas)
+        effective_canvas = auto_canvas
+        manifest["canvas"] = effective_canvas
+        manifest["auto_canvas_from"] = chosen_frame or None
+        if chosen_frame:
+            print(f"Auto-canvas: {effective_canvas} (from largest frame: {chosen_frame})", file=sys.stderr)
+        else:
+            print(f"Auto-canvas: could not parse frame sizes; using fallback canvas {effective_canvas}", file=sys.stderr)
+    else:
+        manifest["canvas"] = effective_canvas
+        manifest["auto_canvas_from"] = None
+
     out_path = resolve_out_path(project_root, uuid_str, args.out)
     manifest["out"] = os.path.relpath(out_path, project_root)
 
     with open(os.path.join(frames_dir, "manifest.json"), "w", encoding="utf-8") as fp:
         json.dump(manifest, fp, indent=2)
 
-    run_ffmpeg_concat(frames_dir, out_path, args.fps, args.canvas)
+    run_ffmpeg_concat(frames_dir, out_path, args.fps, effective_canvas)
 
     print(f"OK: wrote {out_path}")
     print(f"Frames + manifest in: {frames_dir}")
