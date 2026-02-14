@@ -12,7 +12,10 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 BASE_URL_DEFAULT = "http://127.0.0.1:5000"
-CANVAS_DEFAULT = "1280x720"
+CANVAS_PORTRAIT_DEFAULT = "720x1280"
+CANVAS_LANDSCAPE_DEFAULT = "1280x720"
+CANVAS_DEFAULT = CANVAS_PORTRAIT_DEFAULT
+FIT_DEFAULT = "blur"  # "blur" = fills portrait canvas without cropping content
 
 DT_FORMATS = [
     "%Y-%m-%d %H:%M:%S",
@@ -321,7 +324,7 @@ def pick_filename(entry: dict, prefer: str):
 
 # --- ffmpeg render ------------------------------------------------------------
 
-def run_ffmpeg_concat(frames_dir: str, out_path: str, fps: float, canvas: str):
+def run_ffmpeg_concat(frames_dir: str, out_path: str, fps: float, canvas: str, fit_mode: str):
     ensure_ffmpeg_or_exit()
 
     if fps <= 0:
@@ -343,14 +346,35 @@ def run_ffmpeg_concat(frames_dir: str, out_path: str, fps: float, canvas: str):
         fp.write(f"file {files[-1]}\n")
         fp.write(f"file {files[-1]}\n")
 
-    # Fit-to-screen behavior: keep aspect ratio, no stretch; pad to canvas.
-    vf = (
-        f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
-        f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
-        f"format=yuv420p"
-    )
+    # # Fit-to-screen: preserve aspect, no stretch; pad to canvas.
+    # vf = (
+    #     f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+    #     f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
+    #     f"format=yuv420p"
+    # )
 
-    cmd = [
+    if fit_mode == "contain":
+        # No crop, no stretch; may produce bars.
+        vf = (
+            f"scale={w}:{h}:force_original_aspect_ratio=decrease,"
+            f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,"
+            f"setsar=1,format=yuv420p"
+        )
+    elif fit_mode == "blur":
+        # No crop of foreground. Background is stretched+blurred to fill canvas.
+        vf = (
+            f"split=2[bg][fg];"
+            f"[bg]scale={w}:{h},gblur=sigma=24[bg];"
+            f"[fg]scale={w}:{h}:force_original_aspect_ratio=decrease[fg];"
+            f"[bg][fg]overlay=(main_w-overlay_w)/2:(main_h-overlay_h)/2,"
+            f"setsar=1,format=yuv420p"
+        )
+    else:
+        raise ValueError(f"bad --fit {fit_mode!r}")
+
+    # Add a silent audio track for better messenger compatibility.
+    # (Helps some clients classify it as "video" and generate previews consistently.)
+    base_cmd = [
         "ffmpeg",
         "-y",
         "-hide_banner",
@@ -358,12 +382,42 @@ def run_ffmpeg_concat(frames_dir: str, out_path: str, fps: float, canvas: str):
         "-f", "concat",
         "-safe", "0",
         "-i", ffconcat_path,
+        "-f", "lavfi",
+        "-i", "anullsrc=channel_layout=mono:sample_rate=48000",
+        "-map", "0:v:0",
+        "-map", "1:a:0",
         "-vf", vf,
-        "-c:v", "libx264",
-        out_path,
-    ]
-    subprocess.check_call(cmd)
 
+        # “Boring MP4” defaults for broad compatibility:
+        "-c:v", "libx264",
+        "-profile:v", "baseline",
+        "-level", "3.1",
+        "-pix_fmt", "yuv420p",
+        "-preset", "veryfast",
+        "-crf", "23",
+
+        "-c:a", "aac",
+        "-b:a", "96k",
+        "-shortest",
+
+        # Put moov atom at the front (important for previews/streaming).
+        "-movflags", "+faststart",
+    ]
+
+    # Prefer CFR to avoid weird “tbr 25” style metadata confusing clients.
+    cmd1 = base_cmd + ["-r", str(fps), "-fps_mode", "cfr", out_path]
+    p = subprocess.run(cmd1, capture_output=True, text=True)
+
+    if p.returncode != 0:
+        # Older ffmpeg: -fps_mode might not exist -> fallback
+        stderr = (p.stderr or "")
+        if "Unrecognized option" in stderr and "fps_mode" in stderr:
+            cmd2 = base_cmd + ["-r", str(fps), "-vsync", "cfr", out_path]
+            p2 = subprocess.run(cmd2, capture_output=True, text=True)
+            if p2.returncode != 0:
+                raise RuntimeError(f"ffmpeg failed:\n{p2.stderr or p2.stdout}")
+        else:
+            raise RuntimeError(f"ffmpeg failed:\n{stderr or p.stdout}")
 
 # --- Listing helpers ----------------------------------------------------------
 
@@ -476,7 +530,6 @@ def resolve_frames_dir(project_root: str, uuid_str: str, workdir_arg: str | None
     os.makedirs(p, exist_ok=True)
     return os.path.abspath(p)
 
-
 def main():
     argv = sys.argv[1:]
     base_url_given = any(a == "--base-url" or a.startswith("--base-url=") for a in argv)
@@ -507,21 +560,47 @@ def main():
     ap.add_argument("--prefer", choices=["detection_area", "full_frame"], default="detection_area")
     ap.add_argument("--fps", type=float, default=8.0)
 
+    # Canvas / orientation presets
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument(
+        "--portrait",
+        action="store_true",
+        help=f'Shortcut for --canvas "{CANVAS_PORTRAIT_DEFAULT}" (default).',
+    )
+    g.add_argument(
+        "--landscape",
+        action="store_true",
+        help=f'Shortcut for --canvas "{CANVAS_LANDSCAPE_DEFAULT}".',
+    )
+
     ap.add_argument(
         "--canvas",
         default=CANVAS_DEFAULT,
-        help=f'Output canvas WxH for video (default "{CANVAS_DEFAULT}"). '
-             f'NOTE: if you do not specify --canvas, and fit-largest is enabled, the canvas will be auto-selected.',
+        help=f'Output canvas WxH for video (default "{CANVAS_DEFAULT}"). Example: "1080x1920".',
     )
 
-    # DEFAULT ON: auto-pick canvas from largest downloaded frame (unless --canvas explicitly provided)
+    ap.add_argument(
+        "--fit",
+        choices=["contain", "blur"],
+        default=FIT_DEFAULT,
+        help='Fitting mode. "contain" = no crop, may add bars. '
+             '"blur" = no crop of the real frame; fills canvas using a blurred background copy (default).',
+    )
+
+    # Auto-canvas from largest frame (optional)
+    ap.add_argument(
+        "--fit-largest",
+        action="store_true",
+        dest="fit_largest",
+        help='Auto-pick canvas from the largest downloaded frame (overrides default canvas unless --canvas/--portrait/--landscape was explicitly set).',
+    )
     ap.add_argument(
         "--no-fit-largest",
         action="store_false",
         dest="fit_largest",
-        help='Disable auto "fit-to-screen" canvas selection (largest frame).',
+        help="Disable auto-canvas from largest frame.",
     )
-    ap.set_defaults(fit_largest=True)
+    ap.set_defaults(fit_largest=False)
 
     ap.add_argument(
         "--finalized-only",
@@ -540,7 +619,16 @@ def main():
         help='Directory to store frames. Default: "<project_root>/data/frames_<uuid>/". '
              'If relative, it is treated as relative to "<project_root>/data/".',
     )
+
     args = ap.parse_args()
+
+    # Apply portrait/landscape shortcuts. These count as "canvas explicitly set".
+    if args.portrait:
+        args.canvas = CANVAS_PORTRAIT_DEFAULT
+        canvas_given = True
+    elif args.landscape:
+        args.canvas = CANVAS_LANDSCAPE_DEFAULT
+        canvas_given = True
 
     if (not help_requested) and (not base_url_given):
         print(f'NOTE: no --base-url given, trying default ("{BASE_URL_DEFAULT}")', file=sys.stderr)
@@ -639,6 +727,7 @@ def main():
     saved = 0
     manifest = {
         "base_url": base,
+        "fit": args.fit,
         "uuid": uuid_str,
         "prefer": args.prefer,
         "fps": args.fps,
@@ -685,9 +774,6 @@ def main():
     if saved < 2:
         raise RuntimeError(f"Downloaded only {saved} frames -- not enough to make a video.")
 
-    # Auto "fit-to-screen" canvas selection:
-    # - default ON (--no-fit-largest disables)
-    # - only if user did NOT explicitly set --canvas
     effective_canvas = args.canvas
     if args.fit_largest and (not canvas_given):
         auto_canvas, chosen_frame = choose_canvas_from_frames(frames_dir, fallback_canvas=args.canvas)
@@ -708,7 +794,7 @@ def main():
     with open(os.path.join(frames_dir, "manifest.json"), "w", encoding="utf-8") as fp:
         json.dump(manifest, fp, indent=2)
 
-    run_ffmpeg_concat(frames_dir, out_path, args.fps, effective_canvas)
+    run_ffmpeg_concat(frames_dir, out_path, args.fps, effective_canvas, args.fit)
 
     print(f"OK: wrote {out_path}")
     print(f"Frames + manifest in: {frames_dir}")
