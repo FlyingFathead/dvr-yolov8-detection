@@ -286,6 +286,8 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+. **0.17**
+  - Added show/hide buttons into the web server UI to display or hide regions with their names or masked regions with their minimum confidence
 . **0.16.4**
   - Added zone coordinate sanitizer to region masking toolt to prevent out-of-bounds regions being processed or propagated
 - **0.163**

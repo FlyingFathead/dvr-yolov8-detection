@@ -27,10 +27,13 @@ from werkzeug.utils import safe_join
 from waitress import serve 
 
 import cv2
+import numpy as np
 import logging
 from web_graph import generate_detection_graph
 import configparser
 import json
+
+from PIL import Image, ImageDraw, ImageFont
 
 # aggergation for the detections for webUI
 from collections import defaultdict
@@ -48,11 +51,21 @@ app = Flask(__name__)
 # app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 # app.config['APPLICATION_ROOT'] = '/'
 
+# ----------------------------------------------------------------------
 # Global variables to hold the output frame and a lock for thread safety
+# ----------------------------------------------------------------------
 output_frame = None
 frame_lock = threading.Lock()
 # HLS process status
 hls_process = None 
+# ----------------------------------------------------------------------
+# Region overlay global variables
+# ----------------------------------------------------------------------
+region_overlay_lock = threading.Lock()
+show_masked_regions_overlay = False
+show_named_zones_overlay = False
+preview_masked_regions = []
+preview_named_zones = []
 
 # detect interrupt signals and safely write detections if enabled
 def signal_handler(sig, frame):
@@ -387,6 +400,160 @@ def set_output_frame(frame):
     with frame_lock:
         output_frame = frame.copy()
 
+# overlays
+def set_region_overlay_data(masked_regions=None, named_zones=None):
+    global preview_masked_regions, preview_named_zones
+    with region_overlay_lock:
+        preview_masked_regions = list(masked_regions or [])
+        preview_named_zones = list(named_zones or [])
+
+def set_region_overlay_visibility(show_masked=None, show_named=None):
+    global show_masked_regions_overlay, show_named_zones_overlay
+    with region_overlay_lock:
+        if show_masked is not None:
+            show_masked_regions_overlay = bool(show_masked)
+        if show_named is not None:
+            show_named_zones_overlay = bool(show_named)
+
+def get_region_overlay_state():
+    with region_overlay_lock:
+        return {
+            "show_masked_regions": show_masked_regions_overlay,
+            "show_named_zones": show_named_zones_overlay,
+            "masked_region_count": len(preview_masked_regions),
+            "named_zone_count": len(preview_named_zones),
+        }
+
+def draw_labeled_region_text(out, label, x1, y1, color, size=20, pad=6):
+    text_w, text_h = get_unicode_text_size(label, size=size)
+
+    # Always place text inside the rectangle, top-left corner
+    text_x = x1 + pad
+    text_y = y1 + pad
+
+    # Clamp so we don't draw outside the frame
+    text_x = min(max(0, text_x), max(0, out.shape[1] - text_w - 1))
+    text_y = min(max(0, text_y), max(0, out.shape[0] - text_h - 1))
+
+    # Black background behind text for readability
+    bg_x1 = max(0, text_x - 2)
+    bg_y1 = max(0, text_y - 2)
+    bg_x2 = min(out.shape[1] - 1, text_x + text_w + 2)
+    bg_y2 = min(out.shape[0] - 1, text_y + text_h + 2)
+
+    cv2.rectangle(out, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
+
+    return draw_text_unicode_cv2(
+        out,
+        label,
+        (text_x, text_y),
+        color=color,
+        size=size
+    )
+
+def draw_region_overlays(frame):
+    with region_overlay_lock:
+        local_masked = list(preview_masked_regions)
+        local_named = list(preview_named_zones)
+        show_masked = show_masked_regions_overlay
+        show_named = show_named_zones_overlay
+
+    if not show_masked and not show_named:
+        return frame
+
+    out = frame.copy()
+
+    if show_masked:
+        for zone in local_masked:
+            x1 = int(zone.get("x1", 0))
+            y1 = int(zone.get("y1", 0))
+            x2 = int(zone.get("x2", 0))
+            y2 = int(zone.get("y2", 0))
+            name = zone.get("name", "?")
+            thr = float(zone.get("confidence_threshold", 0.0))
+
+            cv2.rectangle(out, (x1, y1), (x2, y2), (0, 0, 255), 2)
+
+            label = f"[MASKED] {name} (min {thr:.2f})"
+            out = draw_labeled_region_text(out, label, x1, y1, (0, 0, 255), size=20, pad=6)
+
+    if show_named:
+        for zone in local_named:
+            x1 = int(zone.get("x1", 0))
+            y1 = int(zone.get("y1", 0))
+            x2 = int(zone.get("x2", 0))
+            y2 = int(zone.get("y2", 0))
+            name = zone.get("name", "?")
+            crit = zone.get("critical_threshold", None)
+
+            cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 255), 2)
+
+            if crit is not None:
+                label = f"[ZONE] {name} (crit {float(crit):.2f})"
+            else:
+                label = f"[ZONE] {name}"
+
+            out = draw_labeled_region_text(out, label, x1, y1, (0, 255, 255), size=20, pad=6)
+
+    return out
+
+# ----------------------------------------------------------------------
+# additional helpers for drawing with pillow
+# ----------------------------------------------------------------------
+_pil_font = None
+
+def get_unicode_text_size(text, size=20):
+    font = get_unicode_font(size=size)
+    bbox = font.getbbox(text)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
+    return text_w, text_h
+
+def get_unicode_font(size=20):
+    global _pil_font
+    if _pil_font is None:
+        # Try a common Linux path first
+        font_candidates = [
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+        ]
+        for path in font_candidates:
+            if os.path.exists(path):
+                _pil_font = ImageFont.truetype(path, size=size)
+                logger.info(f"Using Unicode font for overlays: {path}")
+                break
+        if _pil_font is None:
+            logger.warning("No Unicode TTF font found; falling back to default PIL font.")
+            _pil_font = ImageFont.load_default()
+    return _pil_font
+
+def draw_text_unicode_cv2(frame, text, org, color=(255, 255, 255), size=20):
+    """
+    Draw Unicode text onto an OpenCV BGR frame using Pillow.
+    org = (x, y) baseline-ish top-left anchor.
+    color is BGR to match OpenCV convention.
+    """
+    if frame is None:
+        return frame
+
+    x, y = int(org[0]), int(org[1])
+
+    # Convert BGR -> RGB for PIL
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    pil_img = Image.fromarray(rgb)
+    draw = ImageDraw.Draw(pil_img)
+
+    font = get_unicode_font(size=size)
+
+    # Convert BGR to RGB for PIL
+    rgb_color = (int(color[2]), int(color[1]), int(color[0]))
+
+    draw.text((x, y), text, font=font, fill=rgb_color)
+
+    # Convert back RGB -> BGR
+    out = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+    return out
+
 def generate_frames():
     """Generator function that yields frames in byte format for streaming."""
     global output_frame
@@ -410,6 +577,8 @@ def generate_frames():
         if frame_copy is None:
             time.sleep(0.05) # Wait if no frame available yet
             continue
+
+        frame_copy = draw_region_overlays(frame_copy)
 
         # --- FPS Limiting (applied BEFORE encoding) ---
         current_time = time.time()
@@ -727,7 +896,28 @@ def log_request_info():
 @app.route('/api/', methods=['GET'])
 def api_root():
     return jsonify({"message": "API Root"}), 200
-      
+
+@app.route('/api/region_overlay_state', methods=['GET'])
+def api_region_overlay_state():
+    return jsonify(get_region_overlay_state()), 200
+
+@app.route('/api/toggle_region_overlays', methods=['POST'])
+def api_toggle_region_overlays():
+    data = request.get_json(silent=True) or {}
+
+    show_masked = data.get("show_masked_regions", None)
+    show_named = data.get("show_named_zones", None)
+
+    set_region_overlay_visibility(show_masked=show_masked, show_named=show_named)
+
+    state = get_region_overlay_state()
+    logger.info(
+        "Updated region overlay state: masked=%s, named=%s",
+        state["show_masked_regions"],
+        state["show_named_zones"]
+    )
+    return jsonify(state), 200
+
 @app.route('/api/detections/<path:filename>')
 def serve_detection_image(filename):
     config = app.config.get('config')
@@ -1293,7 +1483,12 @@ def index():
         }
         </script>
     {% endif %}
-    
+
+    <div style="margin: 10px 0;">
+        <button id="toggle-masked-btn">Show Masked Regions</button>
+        <button id="toggle-named-btn">Show Named Zones</button>
+    </div>
+                                  
     <h2>Latest Detections</h2>
     {% for date_label, day_items in grouped_detections.items() %}
     <h3>{{ date_label }}</h3>
@@ -1841,6 +2036,70 @@ def index():
         //    clearInterval(timeIntervalId);
         //    clearInterval(logIntervalId);
         // });
+
+        // overlay / region viewer
+        const toggleMaskedBtn = document.getElementById('toggle-masked-btn');
+        const toggleNamedBtn = document.getElementById('toggle-named-btn');
+
+        let regionOverlayState = {
+            show_masked_regions: false,
+            show_named_zones: false
+        };
+
+        function updateRegionToggleButtons() {
+            if (toggleMaskedBtn) {
+                toggleMaskedBtn.textContent = regionOverlayState.show_masked_regions
+                    ? 'Hide Masked Regions'
+                    : 'Show Masked Regions';
+            }
+            if (toggleNamedBtn) {
+                toggleNamedBtn.textContent = regionOverlayState.show_named_zones
+                    ? 'Hide Named Zones'
+                    : 'Show Named Zones';
+            }
+        }
+
+        function fetchRegionOverlayState() {
+            fetch(`${basePath.replace(/\/$/, '')}/api/region_overlay_state`)
+                .then(resp => resp.json())
+                .then(data => {
+                    regionOverlayState = data;
+                    updateRegionToggleButtons();
+                })
+                .catch(err => console.error('Error fetching region overlay state:', err));
+        }
+
+        function setRegionOverlayState(newState) {
+            fetch(`${basePath.replace(/\/$/, '')}/api/toggle_region_overlays`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newState)
+            })
+            .then(resp => resp.json())
+            .then(data => {
+                regionOverlayState = data;
+                updateRegionToggleButtons();
+            })
+            .catch(err => console.error('Error updating region overlay state:', err));
+        }
+
+        if (toggleMaskedBtn) {
+            toggleMaskedBtn.addEventListener('click', function() {
+                setRegionOverlayState({
+                    show_masked_regions: !regionOverlayState.show_masked_regions
+                });
+            });
+        }
+
+        if (toggleNamedBtn) {
+            toggleNamedBtn.addEventListener('click', function() {
+                setRegionOverlayState({
+                    show_named_zones: !regionOverlayState.show_named_zones
+                });
+            });
+        }
+
+        fetchRegionOverlayState();
 
     </script>
                                       

@@ -47,7 +47,7 @@ import signal
 import sys
 
 # Import web server functions
-from web_server import start_web_server, set_output_frame
+from web_server import start_web_server, set_output_frame, set_region_overlay_data
 
 # Import the remote sync module
 import remote_sync
@@ -517,6 +517,11 @@ main_logger, detection_logger, web_server_logger, detection_log_path = setup_log
 load_masked_regions(config, main_logger)
 # load named zones if enabled
 load_named_zones(config, main_logger)
+
+set_region_overlay_data(masked_regions=masked_regions, named_zones=named_zones)
+main_logger.info(
+    f"Passed ROI overlay data to web UI: {len(masked_regions)} masked, {len(named_zones)} named"
+)
 
 # Timekeeping and frame counting
 last_log_time = time.time()
