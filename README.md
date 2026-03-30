@@ -286,6 +286,8 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+. **0.16.4**
+  - Added zone coordinate sanitizer to region masking toolt to prevent out-of-bounds regions being processed or propagated
 - **0.163**
   - Overlapping ROI's can now be configured in `config.ini` to have different types of properties when processed:
   ```

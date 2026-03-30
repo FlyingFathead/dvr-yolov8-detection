@@ -125,18 +125,30 @@ def scale_frame_if_needed(frame):
     return frame
 
 def to_original_coords(x_disp, y_disp):
+    x_disp, y_disp = clamp_display_coords(x_disp, y_disp)
+
     if display_width == original_width and display_height == original_height:
-        return x_disp, y_disp
+        return clamp_original_coords(x_disp, y_disp)
+
     scale_x = original_width / float(display_width)
     scale_y = original_height / float(display_height)
-    return int(x_disp * scale_x), int(y_disp * scale_y)
+
+    x_orig = int(round(x_disp * scale_x))
+    y_orig = int(round(y_disp * scale_y))
+    return clamp_original_coords(x_orig, y_orig)
 
 def to_display_coords(x_orig, y_orig):
+    x_orig, y_orig = clamp_original_coords(x_orig, y_orig)
+
     if display_width == original_width and display_height == original_height:
         return x_orig, y_orig
+
     scale_x = display_width / float(original_width)
     scale_y = display_height / float(original_height)
-    return int(x_orig * scale_x), int(y_orig * scale_y)
+
+    x_disp = int(round(x_orig * scale_x))
+    y_disp = int(round(y_orig * scale_y))
+    return clamp_display_coords(x_disp, y_disp)
 
 def save_zones_to_json(output_json):
     dir_path = Path(output_json).parent
@@ -163,6 +175,9 @@ def save_zones_to_json(output_json):
 def draw_rectangles(event, x_disp, y_disp, flags, param):
     global ix, iy, drawing, temp_rect, zone_mode
 
+    raw_x_disp, raw_y_disp = int(x_disp), int(y_disp)
+    x_disp, y_disp = clamp_display_coords(raw_x_disp, raw_y_disp)
+
     if event == cv2.EVENT_LBUTTONDOWN:
         drawing = True
         ix, iy = x_disp, y_disp
@@ -173,66 +188,215 @@ def draw_rectangles(event, x_disp, y_disp, flags, param):
 
     elif event == cv2.EVENT_LBUTTONUP:
         drawing = False
-        if temp_rect:
-            x1_disp, y1_disp, x2_disp, y2_disp = temp_rect
-            x1_disp, x2_disp = sorted([x1_disp, x2_disp])
-            y1_disp, y2_disp = sorted([y1_disp, y2_disp])
 
-            x1_orig, y1_orig = to_original_coords(x1_disp, y1_disp)
-            x2_orig, y2_orig = to_original_coords(x2_disp, y2_disp)
+        # Use raw mouse-up coords first so we can detect/report out-of-bounds drag.
+        x1_disp, x2_disp = sorted([ix, raw_x_disp])
+        y1_disp, y2_disp = sorted([iy, raw_y_disp])
 
-            default_name = f"Zone_{len(zones) + 1}"
-            zone_name = input(f"Enter zone name (press Enter for '{default_name}'): ").strip()
-            if not zone_name:
-                zone_name = default_name
+        (x1_disp, y1_disp, x2_disp, y2_disp), was_clamped = clamp_rect_to_display(
+            x1_disp, y1_disp, x2_disp, y2_disp, warn=True
+        )
 
-            new_zone = {
-                "name": zone_name,
-                "x1": x1_orig, "y1": y1_orig,
-                "x2": x2_orig, "y2": y2_orig
-            }
+        # Reject zero-size or collapsed rectangles
+        if x1_disp >= x2_disp or y1_disp >= y2_disp:
+            logger.warning(
+                "Ignoring rectangle: after clamping it has zero width or height: (%d, %d, %d, %d)",
+                x1_disp, y1_disp, x2_disp, y2_disp
+            )
+            temp_rect = None
+            return
 
-            if zone_mode == "masked":
-                # Prompt for min confidence threshold
-                while True:
-                    conf_str = input("Enter min confidence threshold (0.0–1.0, Enter=0.0): ").strip()
-                    if not conf_str:
-                        zone_conf = 0.0
+        x1_orig, y1_orig = to_original_coords(x1_disp, y1_disp)
+        x2_orig, y2_orig = to_original_coords(x2_disp, y2_disp)
+
+        if was_clamped:
+            logger.info(
+                "Saved rectangle as original-frame coords: (%d, %d, %d, %d)",
+                x1_orig, y1_orig, x2_orig, y2_orig
+            )
+
+        default_name = f"Zone_{len(zones) + 1}"
+        zone_name = input(f"Enter zone name (press Enter for '{default_name}'): ").strip()
+        if not zone_name:
+            zone_name = default_name
+
+        new_zone = {
+            "name": zone_name,
+            "x1": x1_orig, "y1": y1_orig,
+            "x2": x2_orig, "y2": y2_orig
+        }
+
+        if zone_mode == "masked":
+            while True:
+                conf_str = input("Enter min confidence threshold (0.0-1.0, Enter=0.0): ").strip()
+                if not conf_str:
+                    zone_conf = 0.0
+                    break
+                try:
+                    zone_conf = float(conf_str)
+                    if 0.0 <= zone_conf <= 1.0:
                         break
-                    try:
-                        zone_conf = float(conf_str)
-                        if 0.0 <= zone_conf <= 1.0:
-                            break
-                        else:
-                            print("Please enter a number between 0.0 and 1.0.")
-                    except ValueError:
-                        print("Invalid input, please enter a numeric value.")
-                new_zone["confidence_threshold"] = zone_conf
-                logger.info(f"Added MASKED zone '{zone_name}' with conf≥{zone_conf:.2f}")
+                    print("Please enter a number between 0.0 and 1.0.")
+                except ValueError:
+                    print("Invalid input, please enter a numeric value.")
+            new_zone["confidence_threshold"] = zone_conf
+            logger.info(f"Added MASKED zone '{zone_name}' with conf>={zone_conf:.2f}")
 
-            elif zone_mode == "named" and use_critical_thresholds:
-                # Prompt for optional critical threshold
-                crit_str = input("Enter critical threshold (0.0–1.0, Enter=none): ").strip()
-                if crit_str:
-                    try:
-                        cval = float(crit_str)
-                        if 0.0 <= cval <= 1.0:
-                            new_zone["critical_threshold"] = cval
-                            logger.info(f"  -> CRITICAL threshold set to {cval:.2f}")
-                        else:
-                            logger.info(f"Value '{crit_str}' out of 0.0–1.0 range. Ignoring.")
-                    except ValueError:
-                        logger.info(f"Invalid input '{crit_str}' for critical threshold. Ignoring.")
+        elif zone_mode == "named" and use_critical_thresholds:
+            crit_str = input("Enter critical threshold (0.0-1.0, Enter=none): ").strip()
+            if crit_str:
+                try:
+                    cval = float(crit_str)
+                    if 0.0 <= cval <= 1.0:
+                        new_zone["critical_threshold"] = cval
+                        logger.info(f"  -> CRITICAL threshold set to {cval:.2f}")
+                    else:
+                        logger.info(f"Value '{crit_str}' out of 0.0-1.0 range. Ignoring.")
+                except ValueError:
+                    logger.info(f"Invalid input '{crit_str}' for critical threshold. Ignoring.")
 
-            zones.append(new_zone)
+        zones.append(new_zone)
 
-            # Immediate chance to save
-            ans = input("Save zones now? (y/N) ").strip().lower()
-            if ans == 'y':
-                save_zones_to_json(zone_output_file)
+        ans = input("Save zones now? (y/N) ").strip().lower()
+        if ans == "y":
+            save_zones_to_json(zone_output_file)
 
         temp_rect = None
 
+# ---------------------------------------------------------------------
+# Additional helpers
+# --------------------------------------------------------------------
+def clamp(val, lo, hi):
+    return max(lo, min(val, hi))
+
+def clamp_display_coords(x, y):
+    if display_width is None or display_height is None:
+        return int(x), int(y)
+    return (
+        clamp(int(x), 0, max(0, display_width - 1)),
+        clamp(int(y), 0, max(0, display_height - 1)),
+    )
+
+def clamp_original_coords(x, y):
+    if original_width is None or original_height is None:
+        return int(x), int(y)
+    return (
+        clamp(int(x), 0, max(0, original_width - 1)),
+        clamp(int(y), 0, max(0, original_height - 1)),
+    )
+
+def clamp_rect_to_display(x1, y1, x2, y2, warn=False):
+    raw_rect = (int(x1), int(y1), int(x2), int(y2))
+
+    clamped_rect = (
+        clamp(raw_rect[0], 0, max(0, display_width - 1)),
+        clamp(raw_rect[1], 0, max(0, display_height - 1)),
+        clamp(raw_rect[2], 0, max(0, display_width - 1)),
+        clamp(raw_rect[3], 0, max(0, display_height - 1)),
+    )
+
+    was_clamped = (clamped_rect != raw_rect)
+
+    if warn and was_clamped:
+        logger.warning(
+            "Rectangle was partially out of bounds; clamped display coords %s -> %s",
+            raw_rect,
+            clamped_rect
+        )
+
+    return clamped_rect, was_clamped
+
+def sanitize_zone_rect(zone):
+    zone = dict(zone)  # avoid mutating the original object directly
+
+    zone_name = zone.get("name", "?")
+
+    x1 = int(zone.get("x1", 0))
+    y1 = int(zone.get("y1", 0))
+    x2 = int(zone.get("x2", 0))
+    y2 = int(zone.get("y2", 0))
+
+    raw_rect = (x1, y1, x2, y2)
+
+    x1, y1 = clamp_original_coords(x1, y1)
+    x2, y2 = clamp_original_coords(x2, y2)
+
+    x1, x2 = sorted([x1, x2])
+    y1, y2 = sorted([y1, y2])
+
+    fixed_rect = (x1, y1, x2, y2)
+
+    zone["x1"] = x1
+    zone["y1"] = y1
+    zone["x2"] = x2
+    zone["y2"] = y2
+
+    changed = (raw_rect != fixed_rect)
+
+    if changed:
+        logger.warning(
+            "Sanitized loaded zone '%s' coords %s -> %s",
+            zone_name,
+            raw_rect,
+            fixed_rect
+        )
+
+    if x1 >= x2 or y1 >= y2:
+        logger.warning(
+            "Loaded zone '%s' is invalid after sanitization: %s",
+            zone_name,
+            fixed_rect
+        )
+
+    return zone, changed
+
+def sanitize_loaded_zones(zones_in, apply_changes=False):
+    if not zones_in:
+        logger.info("No loaded zones to validate.")
+        return [], 0, 0
+
+    logger.info(
+        "Validating %d loaded zone(s) against frame bounds %dx%d...",
+        len(zones_in),
+        original_width,
+        original_height
+    )
+
+    result = []
+    changed_count = 0
+    invalid_count = 0
+
+    for zone in zones_in:
+        clean_zone, changed = sanitize_zone_rect(zone)
+
+        if changed:
+            changed_count += 1
+
+        if clean_zone["x1"] >= clean_zone["x2"] or clean_zone["y1"] >= clean_zone["y2"]:
+            invalid_count += 1
+
+        # keep either original or cleaned, depending on mode
+        result.append(clean_zone if apply_changes else zone)
+
+    if changed_count > 0:
+        logger.warning(
+            "Detected %d loaded zone(s) needing sanitization.",
+            changed_count
+        )
+    else:
+        logger.info("Loaded zones validated; no sanitization needed.")
+
+    if invalid_count > 0:
+        logger.warning(
+            "%d loaded zone(s) are degenerate/invalid even after sanitization.",
+            invalid_count
+        )
+
+    return result, changed_count, invalid_count
+
+# ---------------------------------------------------------------------
+# Main program
+# --------------------------------------------------------------------
 def main():
     global zone_mode, zone_output_file, use_critical_thresholds, zones
 
@@ -307,8 +471,32 @@ def main():
 
     frame_display = scale_frame_if_needed(frame)
 
+    # Inspect loaded zones now that original/display dimensions are known
+    preview_zones, changed_count, invalid_count = sanitize_loaded_zones(
+        zones,
+        apply_changes=False
+    )
+
+    if changed_count > 0:
+        answer = input(
+            f"{changed_count} loaded zone(s) need sanitization. "
+            f"Apply fixes and rewrite '{zone_output_file}' now? [Y/n]: "
+        ).strip().lower()
+
+        if answer in ("", "y", "yes"):
+            zones, _, _ = sanitize_loaded_zones(zones, apply_changes=True)
+            save_zones_to_json(zone_output_file)
+            logger.warning(
+                "Sanitized zones were applied and saved back to '%s'.",
+                zone_output_file
+            )
+        else:
+            logger.warning(
+                "Keeping original loaded zones unchanged in memory and on disk."
+            )
+
     window_title = f"Draw {zone_mode.upper()} Zones"
-    cv2.namedWindow(window_title, cv2.WINDOW_NORMAL)
+    cv2.namedWindow(window_title, cv2.WINDOW_AUTOSIZE)
     cv2.setMouseCallback(window_title, draw_rectangles)
 
     print("Press CTRL-C in the terminal to quit at any time.")
