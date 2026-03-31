@@ -143,7 +143,8 @@ WORKDIR /app
 # Install deps before copying the full repo for better cache behavior
 COPY requirements-docker.txt /app/requirements-docker.txt
 RUN pip install --no-cache-dir -r /app/requirements-docker.txt && \
-    pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+    pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 && \
+    pip install --no-cache-dir --no-deps "ultralytics>=8.3.68"
 
 COPY . /app
 

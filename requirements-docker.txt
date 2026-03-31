@@ -3,7 +3,6 @@ flask>=3.0.3
 waitress>=3.0.2
 matplotlib>=3.9.2
 cycler>=0.12.1
-ultralytics>=8.3.68
 numpy>=1.22.0
 pyttsx3>=2.90
 pytz>=2022.1
