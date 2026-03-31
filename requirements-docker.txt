@@ -3,7 +3,7 @@ flask>=3.0.3
 waitress>=3.0.2
 matplotlib>=3.9.2
 cycler>=0.12.1
-numpy>=1.22.0
+numpy<2
 pyttsx3>=2.90
 pytz>=2022.1
 ffmpeg-python>=0.2.0
