@@ -578,7 +578,8 @@ def generate_frames():
             time.sleep(0.05) # Wait if no frame available yet
             continue
 
-        frame_copy = draw_region_overlays(frame_copy)
+        # # // OLD method
+        # frame_copy = draw_region_overlays(frame_copy)
 
         # --- FPS Limiting (applied BEFORE encoding) ---
         current_time = time.time()
@@ -901,6 +902,29 @@ def api_root():
 def api_region_overlay_state():
     return jsonify(get_region_overlay_state()), 200
 
+@app.route('/api/region_overlay_data', methods=['GET'])
+def api_region_overlay_data():
+    with region_overlay_lock:
+        masked = list(preview_masked_regions)
+        named = list(preview_named_zones)
+        show_masked = show_masked_regions_overlay
+        show_named = show_named_zones_overlay
+
+    frame_width = None
+    frame_height = None
+    with frame_lock:
+        if output_frame is not None:
+            frame_height, frame_width = output_frame.shape[:2]
+
+    return jsonify({
+        "frame_width": frame_width,
+        "frame_height": frame_height,
+        "show_masked_regions": show_masked,
+        "show_named_zones": show_named,
+        "masked_regions": masked,
+        "named_zones": named,
+    }), 200
+
 @app.route('/api/toggle_region_overlays', methods=['POST'])
 def api_toggle_region_overlays():
     data = request.get_json(silent=True) or {}
@@ -1205,6 +1229,30 @@ def index():
             font-size: 1.1em;
             color: #333;
         }
+
+        #preview-container {
+            position: relative;
+            width: 100%;
+            display: block;
+            line-height: 0;
+        }
+
+        #live-preview,
+        #hls-video {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        #overlay-svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: visible;
+        }
+
         /* Modal styles */
         #image-modal {
             display: none;
@@ -1447,34 +1495,31 @@ def index():
 
     {% if preview_method == "mjpeg" %}
         <h2>(MJPEG Preview)</h2>
-        <img src="{{ base_path }}{{ url_for('video_feed') }}" width="100%">
+        <div id="preview-container">
+            <img id="live-preview" src="{{ base_path }}{{ url_for('video_feed') }}" width="100%">
+            <svg id="overlay-svg" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+        </div>
     {% else %}
         <h2>(HLS Preview)</h2>
-        <!-- # We give the video an ID so we can attach Hls.js if needed: -->
-        <video 
-            id="hls-video" 
-            controls 
-            autoplay 
-            muted 
-            playsinline 
-            width="100%"
-        ></video>
+        <div id="preview-container">
+            <video 
+                id="hls-video" 
+                controls 
+                autoplay 
+                muted 
+                playsinline 
+                width="100%"
+            ></video>
+            <svg id="overlay-svg" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+        </div>
 
         <script>
-        // Quick snippet to attach HLS if not natively supported:
         const video = document.getElementById('hls-video');
-        
         const hlsPlaylist = './hls/playlist.m3u8';
-                                  
-        // other variations
-        // const basePath = "{{ base_path }}";
-        // const hlsPlaylist = basePath + '/hls/playlist.m3u8';
-        
+
         if (video.canPlayType('application/vnd.apple.mpegurl')) {
-            // Safari, iOS, etc. can play HLS natively
             video.src = hlsPlaylist;
         } else if (Hls.isSupported()) {
-            // Attach hls.js for other browsers
             var hls = new Hls();
             hls.loadSource(hlsPlaylist);
             hls.attachMedia(video);
@@ -2040,10 +2085,20 @@ def index():
         // overlay / region viewer
         const toggleMaskedBtn = document.getElementById('toggle-masked-btn');
         const toggleNamedBtn = document.getElementById('toggle-named-btn');
+        const overlaySvg = document.getElementById('overlay-svg');
+        const livePreview = document.getElementById('live-preview');
+        const hlsVideo = document.getElementById('hls-video');
 
         let regionOverlayState = {
             show_masked_regions: false,
             show_named_zones: false
+        };
+
+        let regionOverlayData = {
+            frame_width: null,
+            frame_height: null,
+            masked_regions: [],
+            named_zones: []
         };
 
         function updateRegionToggleButtons() {
@@ -2059,14 +2114,130 @@ def index():
             }
         }
 
-        function fetchRegionOverlayState() {
-            fetch(`${basePath.replace(/\/$/, '')}/api/region_overlay_state`)
+        function svgEl(tag, attrs = {}) {
+            const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+            for (const [key, value] of Object.entries(attrs)) {
+                el.setAttribute(key, String(value));
+            }
+            return el;
+        }
+
+        function addZoneToSvg(zone, kind) {
+            if (!overlaySvg) return;
+
+            const x1 = Number(zone.x1 || 0);
+            const y1 = Number(zone.y1 || 0);
+            const x2 = Number(zone.x2 || 0);
+            const y2 = Number(zone.y2 || 0);
+
+            const width = Math.max(0, x2 - x1);
+            const height = Math.max(0, y2 - y1);
+
+            const isMasked = kind === 'masked';
+            const color = isMasked ? '#ff3030' : '#ffd400';
+            const name = zone.name || '?';
+
+            let suffix = '';
+            if (isMasked) {
+                suffix = ` (min ${Number(zone.confidence_threshold || 0).toFixed(2)})`;
+            } else if (zone.critical_threshold !== null && zone.critical_threshold !== undefined) {
+                suffix = ` (crit ${Number(zone.critical_threshold).toFixed(2)})`;
+            }
+
+            const label = `${isMasked ? '[MASKED]' : '[ZONE]'} ${name}${suffix}`;
+
+            overlaySvg.appendChild(svgEl('rect', {
+                x: x1,
+                y: y1,
+                width: width,
+                height: height,
+                fill: 'none',
+                stroke: color,
+                'stroke-width': 2
+            }));
+
+            const textX = x1 + 8;
+            const textY = Math.max(22, y1 + 22);
+
+            const text = svgEl('text', {
+                x: textX,
+                y: textY,
+                fill: color,
+                'font-size': 20,
+                'font-family': 'Arial, DejaVu Sans, sans-serif',
+                'font-weight': '700',
+                'paint-order': 'stroke fill',
+                stroke: '#000000',
+                'stroke-opacity': '1',
+                'stroke-width': 6,
+                'stroke-linejoin': 'round'
+            });
+            text.textContent = label;
+
+            // append first so getBBox() works
+            overlaySvg.appendChild(text);
+
+            const bbox = text.getBBox();
+            const bg = svgEl('rect', {
+                x: bbox.x - 4,
+                y: bbox.y - 2,
+                width: bbox.width + 8,
+                height: bbox.height + 4,
+                fill: '#000000',
+                'fill-opacity': '1'
+            });
+
+            // move black background behind the text
+            overlaySvg.insertBefore(bg, text);
+        }
+
+        function renderRegionOverlaySvg() {
+            if (!overlaySvg) return;
+
+            overlaySvg.replaceChildren();
+
+            const fw = Number(regionOverlayData.frame_width || 0);
+            const fh = Number(regionOverlayData.frame_height || 0);
+
+            if (fw <= 0 || fh <= 0) {
+                return;
+            }
+
+            overlaySvg.setAttribute('viewBox', `0 0 ${fw} ${fh}`);
+
+            if (regionOverlayState.show_masked_regions) {
+                for (const zone of (regionOverlayData.masked_regions || [])) {
+                    addZoneToSvg(zone, 'masked');
+                }
+            }
+
+            if (regionOverlayState.show_named_zones) {
+                for (const zone of (regionOverlayData.named_zones || [])) {
+                    addZoneToSvg(zone, 'named');
+                }
+            }
+        }
+
+        function fetchRegionOverlayData() {
+            fetch(`${basePath.replace(/\/$/, '')}/api/region_overlay_data`)
                 .then(resp => resp.json())
                 .then(data => {
-                    regionOverlayState = data;
+                    regionOverlayData = {
+                        frame_width: data.frame_width,
+                        frame_height: data.frame_height,
+                        masked_regions: data.masked_regions || [],
+                        named_zones: data.named_zones || []
+                    };
+
+                    regionOverlayState = {
+                        show_masked_regions: !!data.show_masked_regions,
+                        show_named_zones: !!data.show_named_zones
+                    };
+
                     updateRegionToggleButtons();
+                    renderRegionOverlaySvg();
                 })
-                .catch(err => console.error('Error fetching region overlay state:', err));
+                .catch(err => console.error('Error fetching region overlay data:', err));
         }
 
         function setRegionOverlayState(newState) {
@@ -2077,8 +2248,12 @@ def index():
             })
             .then(resp => resp.json())
             .then(data => {
-                regionOverlayState = data;
+                regionOverlayState = {
+                    show_masked_regions: !!data.show_masked_regions,
+                    show_named_zones: !!data.show_named_zones
+                };
                 updateRegionToggleButtons();
+                renderRegionOverlaySvg();
             })
             .catch(err => console.error('Error updating region overlay state:', err));
         }
@@ -2099,7 +2274,15 @@ def index():
             });
         }
 
-        fetchRegionOverlayState();
+        if (livePreview) {
+            livePreview.addEventListener('load', fetchRegionOverlayData);
+        }
+
+        if (hlsVideo) {
+            hlsVideo.addEventListener('loadedmetadata', fetchRegionOverlayData);
+        }
+
+        fetchRegionOverlayData();
 
     </script>
                                       

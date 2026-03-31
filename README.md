@@ -286,9 +286,16 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
-. **0.17**
+- **0.18**
+  - Web UI ROI overlays are now rendered client-side as SVG instead of being drawn into the preview frames
+  - Major web preview performance improvement when region overlays are enabled
+  - Masked regions and named zones are now fetched via `/api/region_overlay_data`
+  - ROI overlays are no longer burned into the MJPEG web preview stream
+  - ROI overlays are not written into saved detection images or full-frame captures
+  - Improved ROI label readability in the web UI with solid black text backing / stronger outline
+- **0.17**
   - Added show/hide buttons into the web server UI to display or hide regions with their names or masked regions with their minimum confidence
-. **0.16.4**
+- **0.16.4**
   - Added zone coordinate sanitizer to region masking toolt to prevent out-of-bounds regions being processed or propagated
 - **0.163**
   - Overlapping ROI's can now be configured in `config.ini` to have different types of properties when processed:
