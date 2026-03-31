@@ -24,8 +24,6 @@ RUN apt-get update && \
         ca-certificates \
         curl \
         build-essential \
-        gcc-10 \
-        g++-10 \
         cmake \
         ninja-build \
         pkg-config \
@@ -37,15 +35,17 @@ RUN apt-get update && \
         libjpeg-dev \
         libpng-dev \
         libtiff-dev \
+        zlib1g-dev \
         libavcodec-dev \
         libavformat-dev \
         libswscale-dev \
+        libavutil-dev \
         libv4l-dev \
         libglib2.0-dev \
-        libgomp1 \
-    && rm -rf /var/lib/apt/lists/*
+        libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --upgrade pip
+RUN python3 -m pip install --upgrade pip setuptools wheel
 
 WORKDIR /opt
 
@@ -63,12 +63,12 @@ RUN curl -fsSL -o opencv_contrib.tar.gz \
 
 WORKDIR /opt/opencv/build
 
-RUN PY3_INCLUDE_DIR="$(python3 - <<'PY'\nimport sysconfig\nprint(sysconfig.get_paths()['include'])\nPY\n)" && \
-    PY3_PACKAGES_PATH="$(python3 - <<'PY'\nimport sysconfig\nprint(sysconfig.get_paths()['purelib'])\nPY\n)" && \
+RUN PY3_INCLUDE_DIR="$(python3 -c "import sysconfig; print(sysconfig.get_paths()['include'])")" && \
+    PY3_PACKAGES_PATH="$(python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")" && \
+    echo "PY3_INCLUDE_DIR=${PY3_INCLUDE_DIR}" && \
+    echo "PY3_PACKAGES_PATH=${PY3_PACKAGES_PATH}" && \
     cmake -G Ninja \
       -D CMAKE_BUILD_TYPE=Release \
-      -D CMAKE_C_COMPILER=gcc-10 \
-      -D CMAKE_CXX_COMPILER=g++-10 \
       -D CMAKE_INSTALL_PREFIX=/usr/local \
       -D OPENCV_EXTRA_MODULES_PATH=/opt/opencv_contrib/modules \
       -D WITH_CUDA=ON \
@@ -87,7 +87,7 @@ RUN PY3_INCLUDE_DIR="$(python3 - <<'PY'\nimport sysconfig\nprint(sysconfig.get_p
       -D BUILD_opencv_world=OFF \
       -D BUILD_opencv_python2=OFF \
       -D BUILD_opencv_python3=ON \
-      -D BUILD_LIST=core,imgproc,imgcodecs,videoio,photo,python3,cudaarithm,cudafilters,cudaimgproc,cudawarping \
+      -D BUILD_LIST=core,imgproc,imgcodecs,videoio,photo,python3,cudev,cudaarithm,cudafilters,cudaimgproc,cudawarping \
       -D WITH_GSTREAMER=OFF \
       -D WITH_GTK=OFF \
       -D WITH_QT=OFF \
@@ -145,13 +145,15 @@ RUN apt-get update && \
         libtiff5 \
         libavcodec58 \
         libavformat58 \
+        libavutil56 \
         libswscale5 \
         libv4l-0 \
         libsm6 \
         libxext6 \
         libxrender1 \
         libgl1 \
-    && rm -rf /var/lib/apt/lists/*
+        zlib1g && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /usr/local/ /usr/local/
 
@@ -181,6 +183,7 @@ PY
 
 CMD ["python3", "yolov8_live_rtmp_stream_detection.py", "--headless"]
 
+# # -----------------------------------------------------------------------
 # # // until v0.18
 
 # # Stage 1: Build OpenCV with CUDA
