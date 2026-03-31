@@ -141,8 +141,8 @@ RUN ldconfig && python3 -m pip install --upgrade pip
 WORKDIR /app
 
 # Install deps before copying the full repo for better cache behavior
-COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt && \
+COPY requirements-docker.txt /app/requirements-docker.txt
+RUN pip install --no-cache-dir -r /app/requirements-docker.txt && \
     pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
 COPY . /app
