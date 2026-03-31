@@ -286,6 +286,10 @@ Use `utils/batch_humdet_yolo8_opencv2.py` to run YOLOv8 batch detection on direc
 - Add hooks for sending detections to web servers or APIs
 
 ## Changelog
+- **0.18.1**
+  - Docker / CI: tightened NumPy version handling in the Docker build to avoid dependency breakage
+  - GitHub Actions Docker build now completes successfully again after previous build-space / dependency failure cases
+  - Establishes the current known-good Docker CI build baseline for the project
 - **0.18**
   - Web UI ROI overlays are now rendered client-side as SVG instead of being drawn into the preview frames
   - Major web preview performance improvement when region overlays are enabled
