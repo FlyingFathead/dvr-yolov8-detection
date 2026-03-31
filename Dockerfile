@@ -157,7 +157,8 @@ RUN apt-get update && \
 
 COPY --from=builder /usr/local/ /usr/local/
 
-RUN ldconfig && python3 -m pip install --upgrade pip
+RUN python3 -m pip install --upgrade pip && \
+    python3 -m pip install --no-cache-dir numpy==1.26.4
 
 WORKDIR /app
 
