@@ -6,7 +6,7 @@ ARG OPENCV_VERSION=4.10.0
 ARG CUDA_ARCH_BIN="61;70;75;80;86;89"
 
 # -----------------------------------------------------------------------------
-# Stage 1: build a lean, headless OpenCV with CUDA
+# Stage 1: build lean headless OpenCV with CUDA + contrib CUDA modules
 # -----------------------------------------------------------------------------
 FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION} AS builder
 
@@ -16,6 +16,7 @@ ARG CUDA_ARCH_BIN
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8 \
+    PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
 RUN apt-get update && \
@@ -32,6 +33,7 @@ RUN apt-get update && \
         python3-dev \
         python3-pip \
         python3-numpy \
+        ffmpeg \
         libjpeg-dev \
         libpng-dev \
         libtiff-dev \
@@ -39,7 +41,8 @@ RUN apt-get update && \
         libavformat-dev \
         libswscale-dev \
         libv4l-dev \
-        ffmpeg \
+        libglib2.0-dev \
+        libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install --upgrade pip
@@ -52,52 +55,68 @@ RUN curl -fsSL -o opencv.tar.gz \
     mv opencv-${OPENCV_VERSION} opencv && \
     rm -f opencv.tar.gz
 
+RUN curl -fsSL -o opencv_contrib.tar.gz \
+        https://github.com/opencv/opencv_contrib/archive/${OPENCV_VERSION}.tar.gz && \
+    tar -xzf opencv_contrib.tar.gz && \
+    mv opencv_contrib-${OPENCV_VERSION} opencv_contrib && \
+    rm -f opencv_contrib.tar.gz
+
 WORKDIR /opt/opencv/build
 
-RUN cmake -G Ninja \
-    -D CMAKE_BUILD_TYPE=Release \
-    -D CMAKE_C_COMPILER=gcc-10 \
-    -D CMAKE_CXX_COMPILER=g++-10 \
-    -D CMAKE_INSTALL_PREFIX=/usr/local \
-    -D WITH_CUDA=ON \
-    -D WITH_CUDNN=OFF \
-    -D ENABLE_FAST_MATH=ON \
-    -D CUDA_FAST_MATH=ON \
-    -D WITH_CUBLAS=ON \
-    -D CUDA_ARCH_BIN="${CUDA_ARCH_BIN}" \
-    -D CUDA_ARCH_PTX="" \
-    -D BUILD_TESTS=OFF \
-    -D BUILD_PERF_TESTS=OFF \
-    -D BUILD_EXAMPLES=OFF \
-    -D BUILD_DOCS=OFF \
-    -D BUILD_JAVA=OFF \
-    -D BUILD_opencv_apps=OFF \
-    -D BUILD_opencv_world=OFF \
-    -D BUILD_LIST=core,imgproc,imgcodecs,videoio,photo,python3,cudaarithm,cudafilters,cudaimgproc,cudawarping \
-    -D WITH_GSTREAMER=OFF \
-    -D WITH_GTK=OFF \
-    -D WITH_QT=OFF \
-    -D WITH_OPENGL=OFF \
-    -D WITH_FFMPEG=ON \
-    -D WITH_LIBV4L=ON \
-    -D OPENCV_GENERATE_PKGCONFIG=ON \
-    -D PYTHON3_EXECUTABLE=/usr/bin/python3 \
-    -D PYTHON3_INCLUDE_DIR=/usr/include/python3.10 \
-    -D PYTHON3_PACKAGES_PATH=/usr/local/lib/python3.10/dist-packages \
-    ..
+RUN PY3_INCLUDE_DIR="$(python3 - <<'PY'\nimport sysconfig\nprint(sysconfig.get_paths()['include'])\nPY\n)" && \
+    PY3_PACKAGES_PATH="$(python3 - <<'PY'\nimport sysconfig\nprint(sysconfig.get_paths()['purelib'])\nPY\n)" && \
+    cmake -G Ninja \
+      -D CMAKE_BUILD_TYPE=Release \
+      -D CMAKE_C_COMPILER=gcc-10 \
+      -D CMAKE_CXX_COMPILER=g++-10 \
+      -D CMAKE_INSTALL_PREFIX=/usr/local \
+      -D OPENCV_EXTRA_MODULES_PATH=/opt/opencv_contrib/modules \
+      -D WITH_CUDA=ON \
+      -D WITH_CUDNN=OFF \
+      -D ENABLE_FAST_MATH=ON \
+      -D CUDA_FAST_MATH=ON \
+      -D WITH_CUBLAS=ON \
+      -D CUDA_ARCH_BIN="${CUDA_ARCH_BIN}" \
+      -D CUDA_ARCH_PTX="" \
+      -D BUILD_TESTS=OFF \
+      -D BUILD_PERF_TESTS=OFF \
+      -D BUILD_EXAMPLES=OFF \
+      -D BUILD_DOCS=OFF \
+      -D BUILD_JAVA=OFF \
+      -D BUILD_opencv_apps=OFF \
+      -D BUILD_opencv_world=OFF \
+      -D BUILD_opencv_python2=OFF \
+      -D BUILD_opencv_python3=ON \
+      -D BUILD_LIST=core,imgproc,imgcodecs,videoio,photo,python3,cudaarithm,cudafilters,cudaimgproc,cudawarping \
+      -D WITH_GSTREAMER=OFF \
+      -D WITH_GTK=OFF \
+      -D WITH_QT=OFF \
+      -D WITH_OPENGL=OFF \
+      -D WITH_FFMPEG=ON \
+      -D WITH_LIBV4L=ON \
+      -D OPENCV_GENERATE_PKGCONFIG=ON \
+      -D PYTHON3_EXECUTABLE=/usr/bin/python3 \
+      -D PYTHON3_INCLUDE_DIR="${PY3_INCLUDE_DIR}" \
+      -D PYTHON3_PACKAGES_PATH="${PY3_PACKAGES_PATH}" \
+      ..
 
 RUN ninja -j"$(nproc)" && \
     ninja install && \
     ldconfig
 
-# Safe CI verification: import + build-info only.
-# Do NOT probe live CUDA devices during docker build on GitHub-hosted standard runners.
+# CI-safe verification: import + build info only.
+# Do not probe live CUDA devices during docker build on GitHub-hosted runners.
 RUN python3 - <<'PY'
 import cv2
 print("OpenCV Version:", cv2.__version__)
 info = cv2.getBuildInformation()
 for line in info.splitlines():
-    if "NVIDIA CUDA" in line or "cuDNN" in line or "To be built" in line:
+    if (
+        "NVIDIA CUDA" in line
+        or "cuDNN" in line
+        or "To be built" in line
+        or "Unavailable" in line
+    ):
         print(line)
 PY
 
@@ -134,26 +153,30 @@ RUN apt-get update && \
         libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /usr/local /usr/local
+COPY --from=builder /usr/local/ /usr/local/
 
 RUN ldconfig && python3 -m pip install --upgrade pip
 
 WORKDIR /app
 
-# Install deps before copying the full repo for better cache behavior
+# Install Python deps before copying the full repo for better layer caching
 COPY requirements-docker.txt /app/requirements-docker.txt
-RUN pip install --no-cache-dir -r /app/requirements-docker.txt && \
-    pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 && \
-    pip install --no-cache-dir --no-deps "ultralytics>=8.3.68"
+
+RUN python3 -m pip install --no-cache-dir \
+      torch torchvision torchaudio \
+      --index-url https://download.pytorch.org/whl/cu124 && \
+    python3 -m pip install --no-cache-dir -r /app/requirements-docker.txt
 
 COPY . /app
 
-# Safe smoke test only
+# Runtime smoke test: still no live device probe during build
 RUN python3 - <<'PY'
 import cv2
 print("Runtime OpenCV Version:", cv2.__version__)
 info = cv2.getBuildInformation()
-print("Built with CUDA:", "YES" if "NVIDIA CUDA" in info and "YES" in info else "CHECK_BUILD_INFO")
+for line in info.splitlines():
+    if "NVIDIA CUDA" in line or "To be built" in line:
+        print(line)
 PY
 
 CMD ["python3", "yolov8_live_rtmp_stream_detection.py", "--headless"]
